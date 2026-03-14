@@ -286,39 +286,45 @@ def _appliquer_traite_sinistres(sinistres, traite):
         raise ValueError(f"Type de traité inconnu : {traite['type']}")
 
 
-def appliquer_programme(simulations, liste_traites):
+def compute_charges(simulations, liste_traites):
     """
-    Applique un programme de réassurance (stack de traités) aux simulations.
-
-    Les traités sont appliqués séquentiellement sur chaque sinistre individuel,
-    pour chaque pool (below/above) séparément, puis on somme la charge nette annuelle.
-
-    simulations : liste de dicts {'below': [...], 'above': [...]}
-    liste_traites : liste de dicts décrivant chaque couche du programme
-
-    Retourne (espérance, écart-type) des charges nettes annuelles.
+    Calcule le vecteur complet des charges nettes annuelles après application du programme.
+    Utilisé par appliquer_programme et stats_programme.
     """
     charges = []
     for annee in simulations:
-        # Compatibilité : si l'année est un dict (nouveau format) ou une liste (ancien format)
         if isinstance(annee, dict):
             below = np.asarray(annee.get('below', []), dtype=float)
             above = np.asarray(annee.get('above', []), dtype=float)
         else:
-            # Ancien format (liste plate) — fallback
             below = np.asarray(annee, dtype=float)
             above = np.array([], dtype=float)
-
-        # Appliquer chaque traité séquentiellement sur les deux pools
         for traite in liste_traites:
             below = _appliquer_traite_sinistres(below, traite)
             above = _appliquer_traite_sinistres(above, traite)
+        charges.append(np.sum(below) + np.sum(above))
+    return np.array(charges, dtype=float)
 
-        charge_nette = np.sum(below) + np.sum(above)
-        charges.append(charge_nette)
 
-    charges = np.array(charges, dtype=float)
+def appliquer_programme(simulations, liste_traites):
+    """Retourne (espérance, écart-type) des charges nettes annuelles."""
+    charges = compute_charges(simulations, liste_traites)
     return float(np.mean(charges)), float(np.std(charges, ddof=1))
+
+
+def stats_programme(simulations, liste_traites):
+    """
+    Retourne (espérance, écart-type, VaR95, VaR99, TVaR99) des charges nettes.
+    TVaR99 = moyenne conditionnelle au-delà du quantile 99%.
+    """
+    charges = compute_charges(simulations, liste_traites)
+    esp  = float(np.mean(charges))
+    std  = float(np.std(charges, ddof=1))
+    var95 = float(np.percentile(charges, 95))
+    var99 = float(np.percentile(charges, 99))
+    tail  = charges[charges >= var99]
+    tvar99 = float(np.mean(tail)) if len(tail) > 0 else var99
+    return esp, std, var95, var99, tvar99
 
 
 def formater_description(stack):
@@ -348,6 +354,8 @@ PALETTE = {
     'text': '#E8EDF5',
     'text_muted': '#7A8BA0',
     'border': '#2D4060',
+    'below_freq': '#1ABC9C',   # fréquence sous seuil
+    'above_freq': '#E74C3C',   # fréquence au-dessus du seuil
 }
 
 def card(children, style=None, **kwargs):
@@ -579,6 +587,35 @@ def view_severite_qq(data, fits_data, threshold):
         html.H4("Tableau des Quantiles", style={'color': PALETTE['accent'], 'marginTop': '20px', 'fontSize': '13px', 'letterSpacing': '2px', 'textTransform': 'uppercase'}),
         make_table(quant_rows, [{'name': c, 'id': c} for c in quant_rows[0].keys()]),
     ])
+
+def view_severite_histogram(data, fits_data, threshold):
+    if fits_data is None or data is None:
+        return html.Div("Analysez d'abord les données.", style={'color': PALETTE['text_muted'], 'padding': '40px'})
+    arr = np.array(data)
+    x_min = np.min(arr)
+    x_max = np.percentile(arr, 99)  # tronquer à P99 pour lisibilité
+    x_range = np.linspace(x_min, x_max, 600)
+    fig = go.Figure()
+    fig.add_trace(go.Histogram(
+        x=arr[arr <= x_max], histnorm='probability density', name='Données',
+        nbinsx=50, marker_color='rgba(0,212,180,0.2)',
+        marker_line_color=PALETTE['accent'], marker_line_width=0.8,
+    ))
+    for dist, result in fits_data.items():
+        p = result['params']
+        if dist == 'gamma':      y = stats.gamma.pdf(x_range, p['shape'], scale=p['scale'])
+        elif dist == 'lognorm':  y = stats.lognorm.pdf(x_range, p['shape'], scale=p['scale'])
+        elif dist == 'weibull':  y = stats.weibull_min.pdf(x_range, p['shape'], scale=p['scale'])
+        elif dist == 'pareto':   y = pareto_pdf(x_range, p['shape'], p['scale'])
+        else: continue
+        fig.add_trace(go.Scatter(x=x_range, y=y, mode='lines', name=SEV_DIST_NAMES[dist],
+                                 line=dict(color=SEV_COLORS[dist], width=2)))
+    layout = plotly_layout(f"Histogramme & Densités ajustées (tronqué P99) — Seuil : {threshold:,}", height=480)
+    layout['xaxis']['title'] = "Montant du sinistre"
+    layout['yaxis']['title'] = "Densité"
+    fig.update_layout(layout)
+    return dcc.Graph(figure=fig)
+
 
 # ============================================================
 # VUES FRÉQUENCE
@@ -868,6 +905,7 @@ PAGE_MODELISATION = html.Div([
                     dcc.Tab(label='Paramètres', value='below-details'),
                     dcc.Tab(label='ECDF & Critères', value='below-ecdf-criteria'),
                     dcc.Tab(label='QQ & Quantiles', value='below-qq-quantiles'),
+                    dcc.Tab(label='Histogramme', value='below-histogram'),
                 ], colors={"border": PALETTE['border'], "primary": PALETTE['accent'], "background": PALETTE['surface2']}),
                 html.Div(id='below-content', style={'minHeight': '300px', 'paddingTop': '20px'}),
             ], style={'marginBottom': '16px', 'borderLeft': f"3px solid {PALETTE['success']}"}),
@@ -875,16 +913,16 @@ PAGE_MODELISATION = html.Div([
             # SEGMENT SOUS LE SEUIL - Fréquence
             card([
                 html.Div([
-                    html.Div("∿", style={'color': '#1abc9c', 'marginRight': '8px', 'fontSize': '22px'}),
-                    html.Span("Fréquence — Sinistres SOUS le seuil", style={'color': '#1abc9c', 'fontWeight': '700', 'fontSize': '15px', 'letterSpacing': '1px'}),
+                    html.Div("∿", style={'color': PALETTE['below_freq'], 'marginRight': '8px', 'fontSize': '22px'}),
+                    html.Span("Fréquence — Sinistres SOUS le seuil", style={'color': PALETTE['below_freq'], 'fontWeight': '700', 'fontSize': '15px', 'letterSpacing': '1px'}),
                 ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '16px'}),
                 dcc.Tabs(id='below-freq-tabs', value='below-freq-details', children=[
                     dcc.Tab(label='Paramètres', value='below-freq-details'),
                     dcc.Tab(label='CDF & Critères', value='below-freq-cmf'),
                     dcc.Tab(label='Série temporelle', value='below-freq-ts'),
-                ], colors={"border": PALETTE['border'], "primary": '#1abc9c', "background": PALETTE['surface2']}),
+                ], colors={"border": PALETTE['border'], "primary": PALETTE['below_freq'], "background": PALETTE['surface2']}),
                 html.Div(id='below-freq-content', style={'minHeight': '300px', 'paddingTop': '20px'}),
-            ], style={'marginBottom': '16px', 'borderLeft': '3px solid #1abc9c'}),
+            ], style={'marginBottom': '16px', 'borderLeft': f"3px solid {PALETTE['below_freq']}"}),
 
             # SEGMENT AU-DESSUS DU SEUIL - Sévérité
             card([
@@ -896,6 +934,7 @@ PAGE_MODELISATION = html.Div([
                     dcc.Tab(label='Paramètres', value='above-details'),
                     dcc.Tab(label='ECDF & Critères', value='above-ecdf-criteria'),
                     dcc.Tab(label='QQ & Quantiles', value='above-qq-quantiles'),
+                    dcc.Tab(label='Histogramme', value='above-histogram'),
                 ], colors={"border": PALETTE['border'], "primary": PALETTE['danger'], "background": PALETTE['surface2']}),
                 html.Div(id='above-content', style={'minHeight': '300px', 'paddingTop': '20px'}),
             ], style={'marginBottom': '16px', 'borderLeft': f"3px solid {PALETTE['danger']}"}),
@@ -903,16 +942,16 @@ PAGE_MODELISATION = html.Div([
             # SEGMENT AU-DESSUS DU SEUIL - Fréquence
             card([
                 html.Div([
-                    html.Div("∿", style={'color': '#e74c3c', 'marginRight': '8px', 'fontSize': '22px'}),
-                    html.Span("Fréquence — Sinistres AU-DESSUS du seuil", style={'color': '#e74c3c', 'fontWeight': '700', 'fontSize': '15px', 'letterSpacing': '1px'}),
+                    html.Div("∿", style={'color': PALETTE['above_freq'], 'marginRight': '8px', 'fontSize': '22px'}),
+                    html.Span("Fréquence — Sinistres AU-DESSUS du seuil", style={'color': PALETTE['above_freq'], 'fontWeight': '700', 'fontSize': '15px', 'letterSpacing': '1px'}),
                 ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '16px'}),
                 dcc.Tabs(id='above-freq-tabs', value='above-freq-details', children=[
                     dcc.Tab(label='Paramètres', value='above-freq-details'),
                     dcc.Tab(label='CDF & Critères', value='above-freq-cmf'),
                     dcc.Tab(label='Série temporelle', value='above-freq-ts'),
-                ], colors={"border": PALETTE['border'], "primary": '#e74c3c', "background": PALETTE['surface2']}),
+                ], colors={"border": PALETTE['border'], "primary": PALETTE['above_freq'], "background": PALETTE['surface2']}),
                 html.Div(id='above-freq-content', style={'minHeight': '300px', 'paddingTop': '20px'}),
-            ], style={'borderLeft': '3px solid #e74c3c'}),
+            ], style={'borderLeft': f"3px solid {PALETTE['above_freq']}"}),
         ], style={'flex': '1', 'minWidth': '0'}),
 
     ], style={'display': 'flex', 'gap': '20px', 'padding': '24px', 'maxWidth': '1600px', 'margin': '0 auto'}),
@@ -933,6 +972,35 @@ PAGE_REASSURANCE = html.Div([
 
                 # Bandeau d'info / lois sélectionnées automatiquement
                 html.Div(id='r-model-status-banner'),
+
+                # Overrides manuels (optionnels)
+                html.Details([
+                    html.Summary("⚙  Overrides distributions (optionnel)", style={
+                        'color': PALETTE['text_muted'], 'fontSize': '12px', 'cursor': 'pointer',
+                        'marginBottom': '8px', 'letterSpacing': '0.5px',
+                    }),
+                    html.Div([
+                        html.Label("Sév. ↓ sous seuil", style={'color': PALETTE['text_muted'], 'fontSize': '11px'}),
+                        dcc.Dropdown(id='r-override-bsev', clearable=True, placeholder="Auto (AIC)",
+                                     options=[{'label': v, 'value': k} for k, v in SEV_DIST_NAMES.items()],
+                                     style={'marginBottom': '6px'}),
+                        html.Label("Fréq. ↓ sous seuil", style={'color': PALETTE['text_muted'], 'fontSize': '11px'}),
+                        dcc.Dropdown(id='r-override-bfreq', clearable=True, placeholder="Auto (AIC)",
+                                     options=[{'label': v, 'value': k} for k, v in FREQ_DIST_NAMES.items()],
+                                     style={'marginBottom': '6px'}),
+                        html.Label("Sév. ↑ au-dessus", style={'color': PALETTE['text_muted'], 'fontSize': '11px'}),
+                        dcc.Dropdown(id='r-override-asev', clearable=True, placeholder="Auto (AIC)",
+                                     options=[{'label': v, 'value': k} for k, v in SEV_DIST_NAMES.items()],
+                                     style={'marginBottom': '6px'}),
+                        html.Label("Fréq. ↑ au-dessus", style={'color': PALETTE['text_muted'], 'fontSize': '11px'}),
+                        dcc.Dropdown(id='r-override-afreq', clearable=True, placeholder="Auto (AIC)",
+                                     options=[{'label': v, 'value': k} for k, v in FREQ_DIST_NAMES.items()],
+                                     style={'marginBottom': '4px'}),
+                    ], style={
+                        'backgroundColor': PALETTE['surface2'], 'border': f"1px solid {PALETTE['border']}",
+                        'borderRadius': '6px', 'padding': '10px', 'marginBottom': '10px',
+                    }),
+                ], style={'marginBottom': '12px'}),
 
                 html.Label("Nombre de simulations", style={'color': PALETTE['text_muted'], 'fontSize': '12px', 'display': 'block', 'marginBottom': '4px'}),
                 dcc.Input(id='r-nb-sims', type='number', value=1000, min=100, max=50000, step=100,
@@ -1208,16 +1276,18 @@ def analyze_data(n_clicks, json_data, col, date_col, start_date, threshold):
 @app.callback(Output('below-content', 'children'),
               [Input('below-tabs', 'value'), Input('below-fits', 'data'), Input('below-data-store', 'data'), Input('threshold', 'value')])
 def render_below(tab, fits, data, threshold):
-    if tab == 'below-details': return view_severite_details(data, fits, threshold, "sous")
+    if tab == 'below-details':       return view_severite_details(data, fits, threshold, "sous")
     elif tab == 'below-ecdf-criteria': return view_severite_ecdf(data, fits, threshold)
-    elif tab == 'below-qq-quantiles': return view_severite_qq(data, fits, threshold)
+    elif tab == 'below-qq-quantiles':  return view_severite_qq(data, fits, threshold)
+    elif tab == 'below-histogram':     return view_severite_histogram(data, fits, threshold)
 
 @app.callback(Output('above-content', 'children'),
               [Input('above-tabs', 'value'), Input('above-fits', 'data'), Input('above-data-store', 'data'), Input('threshold', 'value')])
 def render_above(tab, fits, data, threshold):
-    if tab == 'above-details': return view_severite_details(data, fits, threshold, "au-dessus")
+    if tab == 'above-details':        return view_severite_details(data, fits, threshold, "au-dessus")
     elif tab == 'above-ecdf-criteria': return view_severite_ecdf(data, fits, threshold)
-    elif tab == 'above-qq-quantiles': return view_severite_qq(data, fits, threshold)
+    elif tab == 'above-qq-quantiles':  return view_severite_qq(data, fits, threshold)
+    elif tab == 'above-histogram':     return view_severite_histogram(data, fits, threshold)
 
 @app.callback(Output('below-freq-content', 'children'),
               [Input('below-freq-tabs', 'value'), Input('below-freq-store', 'data')])
@@ -1242,9 +1312,6 @@ def render_above_freq(tab, store):
 # ============================================================
 # CALLBACKS RÉASSURANCE
 # ============================================================
-
-SEV_DIST_LABELS = {'gamma': 'Gamma', 'lognorm': 'Lognormale', 'weibull': 'Weibull', 'pareto': 'Pareto'}
-FREQ_DIST_LABELS = {'poisson': 'Poisson', 'neg_binomial': 'Binomiale Négative', 'geometric': 'Géométrique'}
 
 def _best_dist(fits_dict):
     """Retourne la clé de la meilleure distribution selon l'AIC."""
@@ -1310,15 +1377,15 @@ def r_update_banner(below_fits, above_fits, below_freq_store, above_freq_store):
             'color': PALETTE['success'], 'fontSize': '10px', 'fontWeight': '700',
             'letterSpacing': '1.5px', 'marginBottom': '6px',
         }),
-        _make_law_row("Sévérité", bsd, SEV_DIST_LABELS, PALETTE['success']),
-        _make_law_row("Fréquence", bfd, FREQ_DIST_LABELS, '#1abc9c'),
+        _make_law_row("Sévérité", bsd, SEV_DIST_NAMES, PALETTE['success']),
+        _make_law_row("Fréquence", bfd, FREQ_DIST_NAMES, PALETTE['below_freq']),
 
         html.Div("▲  AU-DESSUS DU SEUIL", style={
             'color': PALETTE['danger'], 'fontSize': '10px', 'fontWeight': '700',
             'letterSpacing': '1.5px', 'marginBottom': '6px', 'marginTop': '10px',
         }),
-        _make_law_row("Sévérité", asd, SEV_DIST_LABELS, PALETTE['danger']),
-        _make_law_row("Fréquence", afd, FREQ_DIST_LABELS, '#e74c3c'),
+        _make_law_row("Sévérité", asd, SEV_DIST_NAMES, PALETTE['danger']),
+        _make_law_row("Fréquence", afd, FREQ_DIST_NAMES, PALETTE['above_freq']),
     ], style={
         'backgroundColor': '#0a1f15', 'border': f"1px solid {PALETTE['success']}44",
         'borderRadius': '6px', 'padding': '12px 14px', 'marginBottom': '14px',
@@ -1330,25 +1397,29 @@ def r_update_banner(below_fits, above_fits, below_freq_store, above_freq_store):
     Input('r-btn-simuler', 'n_clicks'),
     [State('r-nb-sims', 'value'),
      State('below-fits', 'data'), State('above-fits', 'data'),
-     State('below-freq-store', 'data'), State('above-freq-store', 'data')],
+     State('below-freq-store', 'data'), State('above-freq-store', 'data'),
+     State('r-override-bsev', 'value'), State('r-override-bfreq', 'value'),
+     State('r-override-asev', 'value'), State('r-override-afreq', 'value')],
     prevent_initial_call=True
 )
-def r_run_simulations(n, n_sims, below_fits, above_fits, below_freq_store, above_freq_store):
+def r_run_simulations(n, n_sims, below_fits, above_fits, below_freq_store, above_freq_store,
+                      ov_bsev, ov_bfreq, ov_asev, ov_afreq):
     if not n:
         return dash.no_update, dash.no_update, dash.no_update
 
-    # Sélection automatique de la meilleure loi par AIC
-    bsd = _best_dist(below_fits)
-    asd = _best_dist(above_fits)
     below_freq_fits = below_freq_store.get('fits') if below_freq_store else None
     above_freq_fits = above_freq_store.get('fits') if above_freq_store else None
-    bfd = _best_dist(below_freq_fits)
-    afd = _best_dist(above_freq_fits)
 
-    bsev_params = below_fits[bsd]['params'] if below_fits and bsd else None
-    asev_params = above_fits[asd]['params'] if above_fits and asd else None
-    bfreq_params = below_freq_fits[bfd]['params'] if below_freq_fits and bfd else None
-    afreq_params = above_freq_fits[afd]['params'] if above_freq_fits and afd else None
+    # Override manuel ou sélection automatique par AIC
+    bsd = ov_bsev or _best_dist(below_fits)
+    asd = ov_asev or _best_dist(above_fits)
+    bfd = ov_bfreq or _best_dist(below_freq_fits)
+    afd = ov_afreq or _best_dist(above_freq_fits)
+
+    bsev_params  = below_fits[bsd]['params']       if below_fits       and bsd and bsd in below_fits       else None
+    asev_params  = above_fits[asd]['params']        if above_fits       and asd and asd in above_fits        else None
+    bfreq_params = below_freq_fits[bfd]['params']   if below_freq_fits  and bfd and bfd in below_freq_fits   else None
+    afreq_params = above_freq_fits[afd]['params']   if above_freq_fits  and afd and afd in above_freq_fits   else None
 
     if not bsev_params and not asev_params:
         return dash.no_update, dash.no_update, "⚠ Aucune distribution disponible. Lancez d'abord la modélisation."
@@ -1363,17 +1434,18 @@ def r_run_simulations(n, n_sims, below_fits, above_fits, below_freq_store, above
         afd, afreq_params,
     )
 
-    e, s = appliquer_programme(sims, [])
+    e, s, v95, v99, tv99 = stats_programme(sims, [])
 
-    # Description détaillée du modèle utilisé
     desc_parts = []
-    if bsd and bsev_params: desc_parts.append(f"Sév.↓ {SEV_DIST_LABELS.get(bsd, bsd)}")
-    if bfd and bfreq_params: desc_parts.append(f"Fréq.↓ {FREQ_DIST_LABELS.get(bfd, bfd)}")
-    if asd and asev_params: desc_parts.append(f"Sév.↑ {SEV_DIST_LABELS.get(asd, asd)}")
-    if afd and afreq_params: desc_parts.append(f"Fréq.↑ {FREQ_DIST_LABELS.get(afd, afd)}")
+    if bsd and bsev_params:  desc_parts.append(f"Sév.↓ {SEV_DIST_NAMES.get(bsd, bsd)}")
+    if bfd and bfreq_params: desc_parts.append(f"Fréq.↓ {FREQ_DIST_NAMES.get(bfd, bfd)}")
+    if asd and asev_params:  desc_parts.append(f"Sév.↑ {SEV_DIST_NAMES.get(asd, asd)}")
+    if afd and afreq_params: desc_parts.append(f"Fréq.↑ {FREQ_DIST_NAMES.get(afd, afd)}")
 
-    status = f"✓ {n_sims:,} simulations générées | {' · '.join(desc_parts)}"
-    brut_entry = [{'id': 'brut', 'name': 'BRUT (sans réassurance)', 'esp': e, 'std': s,
+    ov_flag = " [override]" if any([ov_bsev, ov_bfreq, ov_asev, ov_afreq]) else ""
+    status = f"✓ {n_sims:,} simulations générées{ov_flag} | {' · '.join(desc_parts)}"
+    brut_entry = [{'id': 'brut', 'name': 'BRUT (sans réassurance)',
+                   'esp': e, 'std': s, 'var95': v95, 'var99': v99, 'tvar99': tv99,
                    'desc': f"Brut — {' | '.join(desc_parts)}"}]
     return sims, brut_entry, status
 
@@ -1425,10 +1497,12 @@ def r_manage_programs(n_save, n_del, n_reset, stack, name, saved, sims, prog_to_
         current = [p for p in current if p['id'] != prog_to_del]
         return current, dash.no_update, [{'label': p['name'], 'value': p['id']} for p in current if p['id'] != 'brut']
     if trigger == 'r-btn-save-prog' and sims:
-        e, s = appliquer_programme(sims, stack or [])
+        e, s, v95, v99, tv99 = stats_programme(sims, stack or [])
         new_id = f"prog_{len(current)}_{np.random.randint(9999)}"
         p_name = name if name else f"Programme {len(current)}"
-        current.append({'id': new_id, 'name': p_name, 'esp': e, 'std': s, 'desc': formater_description(stack or [])})
+        current.append({'id': new_id, 'name': p_name, 'esp': e, 'std': s,
+                        'var95': v95, 'var99': v99, 'tvar99': tv99,
+                        'desc': formater_description(stack or [])})
         return current, [], [{'label': p['name'], 'value': p['id']} for p in current if p['id'] != 'brut']
     return dash.no_update, dash.no_update, dash.no_update
 
@@ -1487,10 +1561,14 @@ def r_render_visuals(progs, std_min, std_max):
     def creer_table_reas(df):
         if df.empty: return html.Div("Aucun programme.", style={'color': PALETTE['text_muted']})
         rows = df.copy()
-        rows['esp'] = rows['esp'].apply(lambda x: f"{x:,.0f} €")
-        rows['std'] = rows['std'].apply(lambda x: f"{x:,.0f} €")
-        cols = [{'name': 'Programme', 'id': 'name'}, {'name': 'Structure', 'id': 'desc'},
-                {'name': 'Espérance', 'id': 'esp'}, {'name': 'Écart-type', 'id': 'std'}]
+        for col in ['esp', 'std', 'var95', 'var99', 'tvar99']:
+            if col in rows.columns:
+                rows[col] = rows[col].apply(lambda x: f"{x:,.0f} €" if pd.notna(x) else 'N/A')
+        base_cols = [{'name': 'Programme', 'id': 'name'}, {'name': 'Structure', 'id': 'desc'},
+                     {'name': 'Espérance', 'id': 'esp'}, {'name': 'Écart-type', 'id': 'std'}]
+        extra_cols = [{'name': 'VaR 95%', 'id': 'var95'}, {'name': 'VaR 99%', 'id': 'var99'},
+                      {'name': 'TVaR 99%', 'id': 'tvar99'}]
+        cols = base_cols + [c for c in extra_cols if c['id'] in rows.columns]
         return make_table(rows.to_dict('records'), cols)
 
     table_all = creer_table_reas(df_p)
