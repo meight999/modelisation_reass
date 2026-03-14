@@ -369,26 +369,41 @@ def card(children, style=None, **kwargs):
     return html.Div(children, style=base, **kwargs)
 
 def section_title(text, color=None):
+    c = color or PALETTE['accent']
     return html.Div([
+        html.Div(style={
+            'width': '3px', 'height': '14px', 'backgroundColor': c,
+            'borderRadius': '2px', 'marginRight': '10px', 'flexShrink': '0',
+        }),
         html.Span(text, style={
-            'fontSize': '13px',
-            'fontWeight': '700',
-            'letterSpacing': '2px',
-            'textTransform': 'uppercase',
-            'color': color or PALETTE['accent'],
-        })
-    ], style={'borderBottom': f"1px solid {PALETTE['border']}", 'paddingBottom': '12px', 'marginBottom': '18px'})
+            'fontSize': '12px', 'fontWeight': '700', 'letterSpacing': '1.5px',
+            'textTransform': 'uppercase', 'color': c,
+        }),
+    ], style={
+        'display': 'flex', 'alignItems': 'center',
+        'borderBottom': f"1px solid {PALETTE['border']}",
+        'paddingBottom': '12px', 'marginBottom': '18px',
+    })
 
 def stat_badge(label, value, color=None):
+    c = color or PALETTE['accent']
     return html.Div([
-        html.Div(value, style={'fontSize': '22px', 'fontWeight': '700', 'color': color or PALETTE['accent'], 'fontFamily': "'Courier New', monospace"}),
-        html.Div(label, style={'fontSize': '11px', 'color': PALETTE['text_muted'], 'letterSpacing': '1px', 'textTransform': 'uppercase', 'marginTop': '2px'}),
+        html.Div(value, style={
+            'fontSize': '20px', 'fontWeight': '700', 'color': c,
+            'fontFamily': "'JetBrains Mono', monospace", 'letterSpacing': '-0.5px',
+        }),
+        html.Div(label, style={
+            'fontSize': '10px', 'color': PALETTE['text_muted'],
+            'letterSpacing': '0.8px', 'textTransform': 'uppercase',
+            'marginTop': '4px', 'fontWeight': '500',
+        }),
     ], style={
         'backgroundColor': PALETTE['surface2'],
         'border': f"1px solid {PALETTE['border']}",
-        'borderRadius': '8px',
-        'padding': '14px 18px',
-        'minWidth': '130px',
+        'borderLeft': f"3px solid {c}",
+        'borderRadius': '6px',
+        'padding': '12px 16px',
+        'minWidth': '120px',
         'textAlign': 'center',
     })
 
@@ -443,18 +458,40 @@ def make_table(data, columns, highlight_first=False):
     )
 
 def plotly_layout(title="", height=450):
+    _grid = 'rgba(45,64,96,0.35)'
     return dict(
-        title=dict(text=title, font=dict(color=PALETTE['text'], size=15, family="'Courier New', monospace")),
+        title=dict(
+            text=f"<b>{title}</b>" if title else "",
+            font=dict(color=PALETTE['text'], size=14, family="'Space Grotesk', sans-serif"),
+            x=0.01, xanchor='left', pad=dict(b=6),
+        ),
         paper_bgcolor=PALETTE['surface'],
-        plot_bgcolor=PALETTE['surface2'],
-        font=dict(color=PALETTE['text_muted'], size=12),
+        plot_bgcolor='#0E1826',
+        font=dict(color=PALETTE['text_muted'], size=12, family="'Space Grotesk', sans-serif"),
         height=height,
-        margin=dict(l=50, r=30, t=50, b=50),
-        xaxis=dict(gridcolor=PALETTE['border'], linecolor=PALETTE['border'], zerolinecolor=PALETTE['border']),
-        yaxis=dict(gridcolor=PALETTE['border'], linecolor=PALETTE['border'], zerolinecolor=PALETTE['border']),
-        legend=dict(bgcolor=PALETTE['surface'], bordercolor=PALETTE['border'], borderwidth=1,
-                    font=dict(color=PALETTE['text'])),
+        margin=dict(l=72, r=28, t=56, b=72),
+        xaxis=dict(
+            gridcolor=_grid, linecolor=PALETTE['border'], zerolinecolor=_grid,
+            tickfont=dict(size=11, color=PALETTE['text_muted']),
+            title_font=dict(size=12, color=PALETTE['text'], family="'Space Grotesk', sans-serif"),
+            title_standoff=14,
+        ),
+        yaxis=dict(
+            gridcolor=_grid, linecolor=PALETTE['border'], zerolinecolor=_grid,
+            tickfont=dict(size=11, color=PALETTE['text_muted']),
+            title_font=dict(size=12, color=PALETTE['text'], family="'Space Grotesk', sans-serif"),
+            title_standoff=14,
+        ),
+        legend=dict(
+            bgcolor='rgba(22,32,50,0.95)', bordercolor=PALETTE['border'], borderwidth=1,
+            font=dict(color=PALETTE['text'], size=11, family="'Space Grotesk', sans-serif"),
+            itemsizing='constant',
+        ),
         hovermode='closest',
+        hoverlabel=dict(
+            bgcolor=PALETTE['surface2'], bordercolor=PALETTE['border'],
+            font=dict(color=PALETTE['text'], size=12, family="'Space Grotesk', sans-serif"),
+        ),
     )
 
 # ============================================================
@@ -511,9 +548,11 @@ def view_severite_ecdf(data, fits_data, threshold):
         elif dist == 'pareto': y = pareto_cdf(x_range, p['shape'], p['scale'])
         fig.add_trace(go.Scatter(x=x_range, y=y, mode='lines', name=SEV_DIST_NAMES[dist],
                                  line=dict(color=SEV_COLORS[dist], width=2)))
-    layout = plotly_layout(f"ECDF — Seuil : {threshold:,}", height=480)
-    layout['xaxis']['title'] = "Montant du sinistre"
-    layout['yaxis']['title'] = "Probabilité cumulée"
+    layout = plotly_layout(f"ECDF — Seuil : {threshold:,.0f} €", height=480)
+    layout['xaxis']['title'] = "Montant du sinistre (€)"
+    layout['xaxis']['tickformat'] = ',.0f'
+    layout['xaxis']['exponentformat'] = 'none'
+    layout['yaxis']['title'] = "Probabilité cumulée F(x)"
     fig.update_layout(layout)
 
     comp = []
@@ -561,11 +600,13 @@ def view_severite_qq(data, fits_data, threshold):
         lo = max(lo, 1e-6)  # éviter 0 en log
         fig.add_trace(go.Scatter(x=[lo, hi], y=[lo, hi], mode='lines', name='y = x',
                                  line=dict(color=PALETTE['warning'], dash='dash', width=2)))
-    layout = plotly_layout("QQ-Plots — Théorique vs Empirique (échelle log)", height=480)
+    layout = plotly_layout("QQ-Plot — Quantiles théoriques vs empiriques (échelle log)", height=480)
     layout['xaxis']['title'] = "Quantiles théoriques (log)"
     layout['xaxis']['type'] = 'log'
+    layout['xaxis']['exponentformat'] = 'e'
     layout['yaxis']['title'] = "Quantiles empiriques (log)"
     layout['yaxis']['type'] = 'log'
+    layout['yaxis']['exponentformat'] = 'e'
     fig.update_layout(layout)
 
     probs = [0.50, 0.75, 0.90, 0.95, 0.99]
@@ -610,9 +651,11 @@ def view_severite_histogram(data, fits_data, threshold):
         else: continue
         fig.add_trace(go.Scatter(x=x_range, y=y, mode='lines', name=SEV_DIST_NAMES[dist],
                                  line=dict(color=SEV_COLORS[dist], width=2)))
-    layout = plotly_layout(f"Histogramme & Densités ajustées (tronqué P99) — Seuil : {threshold:,}", height=480)
-    layout['xaxis']['title'] = "Montant du sinistre"
-    layout['yaxis']['title'] = "Densité"
+    layout = plotly_layout(f"Histogramme & densités ajustées (tronqué P99) — Seuil : {threshold:,.0f} €", height=480)
+    layout['xaxis']['title'] = "Montant du sinistre (€)"
+    layout['xaxis']['tickformat'] = ',.0f'
+    layout['xaxis']['exponentformat'] = 'none'
+    layout['yaxis']['title'] = "Densité de probabilité"
     fig.update_layout(layout)
     return dcc.Graph(figure=fig)
 
@@ -687,9 +730,11 @@ def view_freq_cmf(counts, fits, labels):
             ))
 
     layout = plotly_layout("CDF de fréquence annuelle — Empirique vs Théorique", height=450)
-    layout['xaxis']['title'] = "Sinistres / an"
+    layout['xaxis']['title'] = "Nombre de sinistres / an"
+    layout['xaxis']['tickformat'] = 'd'
     layout['yaxis']['title'] = "Probabilité cumulée F(k)"
-    layout['yaxis']['range'] = [0, 1.02]
+    layout['yaxis']['range'] = [0, 1.05]
+    layout['yaxis']['tickformat'] = '.0%'
     fig.update_layout(layout)
 
     if not fits:
@@ -754,7 +799,9 @@ def view_freq_ts(counts, fits, labels):
                              name=f"Moyenne ({mean_c:.1f})", line=dict(color=PALETTE['danger'], width=2, dash='dash')))
     layout = plotly_layout("Évolution temporelle de la fréquence annuelle", height=430)
     layout['xaxis']['title'] = "Année"
-    layout['yaxis']['title'] = "Nombre de sinistres"
+    layout['xaxis']['type'] = 'category'
+    layout['yaxis']['title'] = "Nombre de sinistres / an"
+    layout['yaxis']['tickformat'] = 'd'
     layout['barmode'] = 'overlay'
     fig.update_layout(layout)
 
@@ -790,64 +837,188 @@ app.title = "Sinistre — Modélisation & Réassurance"
 
 # Styles globaux injectés via un composant caché
 GLOBAL_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { background-color: #0F1923 !important; font-family: 'Space Grotesk', sans-serif; }
-.tab-selected { background-color: #00D4B4 !important; color: #000 !important; font-weight: 700 !important; border-top: 3px solid #00D4B4 !important; }
-.tab { background-color: #1A2535 !important; color: #7A8BA0 !important; border: 1px solid #2D4060 !important; }
-::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: #0F1923; } ::-webkit-scrollbar-thumb { background: #2D4060; border-radius: 3px; }
-input[type=number]::-webkit-inner-spin-button { opacity: 0.3; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
-/* ---- Dropdown Dash : contrôle (valeur sélectionnée) ---- */
-.Select-control { background-color: #243044 !important; border: 1px solid #2D4060 !important; border-radius: 6px !important; }
-.Select-value-label { color: #E8EDF5 !important; font-size: 13px !important; }
-.Select-placeholder { color: #7A8BA0 !important; font-size: 13px !important; }
-.Select-arrow { border-color: #7A8BA0 transparent transparent !important; }
-.Select.is-focused > .Select-control { border-color: #00D4B4 !important; box-shadow: 0 0 0 1px #00D4B4 !important; }
-.Select-input > input { color: #E8EDF5 !important; }
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-/* ---- Menu déroulant (liste d'options) ---- */
-.Select-menu-outer { background-color: #1E2D42 !important; border: 1px solid #2D4060 !important; border-radius: 6px !important; box-shadow: 0 8px 24px rgba(0,0,0,0.5) !important; z-index: 9999 !important; }
-.Select-menu { background-color: #1E2D42 !important; }
-.Select-option { background-color: #1E2D42 !important; color: #C8D6E8 !important; font-size: 13px !important; padding: 10px 14px !important; }
-.Select-option:hover, .Select-option.is-focused { background-color: #243044 !important; color: #E8EDF5 !important; }
-.Select-option.is-selected { background-color: #00D4B4 !important; color: #000 !important; font-weight: 600 !important; }
-.VirtualizedSelectFocusedOption { background-color: #243044 !important; color: #E8EDF5 !important; }
-.VirtualizedSelectSelectedOption { background-color: #00D4B4 !important; color: #000 !important; }
+body {
+  background-color: #0E1520 !important;
+  font-family: 'Space Grotesk', 'Inter', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #F1F5F9;
+  -webkit-font-smoothing: antialiased;
+}
 
-/* ---- Multi-select tags ---- */
-.Select-value { background-color: #243044 !important; border-color: #2D4060 !important; color: #E8EDF5 !important; }
-.Select-value-icon { color: #7A8BA0 !important; border-right-color: #2D4060 !important; }
-.Select-value-icon:hover { background-color: #FF4D6D !important; color: #fff !important; }
+/* ── Scrollbar ─────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0E1520; }
+::-webkit-scrollbar-thumb { background: #2D3F5E; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #3D5278; }
+
+/* ── Inputs ────────────────────────────────────────────── */
+input, textarea {
+  font-family: 'Space Grotesk', sans-serif !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+}
+input:focus, textarea:focus {
+  outline: none !important;
+  border-color: #00C4A7 !important;
+  box-shadow: 0 0 0 3px rgba(0,196,167,0.12) !important;
+}
+input[type=number]::-webkit-inner-spin-button { opacity: 0.25; }
+
+/* ── Dash Tabs ─────────────────────────────────────────── */
+.tab {
+  background-color: #162032 !important;
+  color: #6B7FA0 !important;
+  border: 1px solid #2D3F5E !important;
+  border-bottom: none !important;
+  font-family: 'Space Grotesk', sans-serif !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  letter-spacing: 0.3px !important;
+  transition: color 0.15s ease, background-color 0.15s ease !important;
+  cursor: pointer !important;
+}
+.tab:hover {
+  color: #A8BACE !important;
+  background-color: #1A2840 !important;
+}
+.tab--selected, .tab-selected {
+  font-weight: 700 !important;
+  border-bottom: none !important;
+}
+
+/* ── Details / Summary ─────────────────────────────────── */
+details summary { cursor: pointer; user-select: none; }
+details summary::-webkit-details-marker { color: #6B7FA0; }
+
+/* ── Dash DataTable ────────────────────────────────────── */
+.dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner td,
+.dash-table-container .dash-spreadsheet-container .dash-spreadsheet-inner th {
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 12px !important;
+}
+
+/* ── Dropdown (react-select v1 used by Dash) ───────────── */
+.Select-control {
+  background-color: #1E2D42 !important;
+  border: 1px solid #2D3F5E !important;
+  border-radius: 6px !important;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+  min-height: 36px !important;
+}
+.Select-value-label { color: #E8EDF5 !important; font-size: 13px !important; font-family: 'Space Grotesk', sans-serif !important; }
+.Select-placeholder { color: #6B7FA0 !important; font-size: 13px !important; }
+.Select-arrow { border-color: #6B7FA0 transparent transparent !important; }
+.Select.is-focused > .Select-control {
+  border-color: #00C4A7 !important;
+  box-shadow: 0 0 0 3px rgba(0,196,167,0.12) !important;
+}
+.Select-input > input { color: #E8EDF5 !important; font-family: 'Space Grotesk', sans-serif !important; }
+.Select-menu-outer {
+  background-color: #1A2A3E !important;
+  border: 1px solid #2D3F5E !important;
+  border-radius: 8px !important;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.6) !important;
+  z-index: 9999 !important;
+  margin-top: 2px !important;
+}
+.Select-menu { background-color: transparent !important; }
+.Select-option {
+  background-color: transparent !important;
+  color: #C0CEDF !important;
+  font-size: 13px !important;
+  padding: 9px 14px !important;
+  font-family: 'Space Grotesk', sans-serif !important;
+  transition: background-color 0.1s ease !important;
+}
+.Select-option:hover, .Select-option.is-focused { background-color: #243348 !important; color: #E8EDF5 !important; }
+.Select-option.is-selected { background-color: rgba(0,196,167,0.15) !important; color: #00C4A7 !important; font-weight: 600 !important; }
+.VirtualizedSelectFocusedOption { background-color: #243348 !important; color: #E8EDF5 !important; }
+.VirtualizedSelectSelectedOption { background-color: rgba(0,196,167,0.15) !important; color: #00C4A7 !important; }
+.Select-value { background-color: #243348 !important; border-color: #2D3F5E !important; color: #E8EDF5 !important; border-radius: 4px !important; }
+.Select-value-icon { color: #6B7FA0 !important; border-right-color: #2D3F5E !important; }
+.Select-value-icon:hover { background-color: #EF4444 !important; color: #fff !important; border-radius: 4px 0 0 4px !important; }
+
+/* ── Loading overlay ───────────────────────────────────── */
+._dash-loading { opacity: 0.5; transition: opacity 0.2s ease; }
 """
 
-# NAV TABS PRINCIPALE
+_NAV_BTN_BASE = {
+    'border': 'none', 'borderRadius': '6px', 'cursor': 'pointer',
+    'padding': '8px 22px', 'fontSize': '13px', 'fontWeight': '600',
+    'letterSpacing': '0.4px', 'fontFamily': "'Space Grotesk', sans-serif",
+    'transition': 'all 0.15s ease',
+}
 NAV_TABS = html.Div([
     html.Div([
+        # Brand
         html.Div([
-            html.Span("◈", style={'color': PALETTE['accent'], 'fontSize': '22px', 'marginRight': '10px'}),
-            html.Span("Sinistre", style={'color': PALETTE['text'], 'fontSize': '20px', 'fontWeight': '700', 'letterSpacing': '2px', 'fontFamily': "'JetBrains Mono', monospace"}),
-        ], style={'display': 'flex', 'alignItems': 'center'}),
+            html.Div([
+                html.Span("◈ ", style={'color': PALETTE['accent'], 'fontSize': '18px'}),
+                html.Span("RiskLens", style={
+                    'color': PALETTE['text'], 'fontSize': '17px', 'fontWeight': '700',
+                    'letterSpacing': '1px', 'fontFamily': "'JetBrains Mono', monospace",
+                }),
+            ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '2px'}),
+            html.Div("Modélisation & Réassurance", style={
+                'fontSize': '11px', 'color': PALETTE['text_muted'],
+                'letterSpacing': '0.5px', 'marginLeft': '2px',
+            }),
+        ]),
+        # Navigation
         html.Div([
             html.Button("Modélisation", id='nav-modelisation', n_clicks=0, style={
-                'backgroundColor': PALETTE['accent'], 'color': '#000', 'border': 'none',
-                'padding': '8px 20px', 'borderRadius': '6px', 'cursor': 'pointer',
-                'fontWeight': '700', 'fontSize': '13px', 'letterSpacing': '1px', 'marginRight': '8px'
+                **_NAV_BTN_BASE,
+                'backgroundColor': PALETTE['accent'], 'color': '#000',
+                'marginRight': '6px',
             }),
             html.Button("Réassurance", id='nav-reassurance', n_clicks=0, style={
+                **_NAV_BTN_BASE,
                 'backgroundColor': 'transparent', 'color': PALETTE['text_muted'],
-                'border': f"1px solid {PALETTE['border']}", 'padding': '8px 20px',
-                'borderRadius': '6px', 'cursor': 'pointer', 'fontWeight': '600', 'fontSize': '13px', 'letterSpacing': '1px'
+                'border': f"1px solid {PALETTE['border']}",
             }),
-        ], style={'display': 'flex'}),
-    ], style={'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center',
-              'maxWidth': '1600px', 'margin': '0 auto', 'padding': '0 30px'}),
-], style={'backgroundColor': PALETTE['surface'], 'padding': '18px 0',
-          'borderBottom': f"1px solid {PALETTE['border']}", 'position': 'sticky', 'top': '0', 'zIndex': '1000'})
+        ], style={'display': 'flex', 'alignItems': 'center'}),
+    ], style={
+        'display': 'flex', 'justifyContent': 'space-between', 'alignItems': 'center',
+        'maxWidth': '1600px', 'margin': '0 auto', 'padding': '0 32px',
+    }),
+], style={
+    'backgroundColor': PALETTE['surface'],
+    'padding': '14px 0',
+    'borderBottom': f"1px solid {PALETTE['border']}",
+    'position': 'sticky', 'top': '0', 'zIndex': '1000',
+    'boxShadow': '0 2px 12px rgba(0,0,0,0.3)',
+})
 
 # ============================================================
 # PAGE MODÉLISATION
 # ============================================================
+
+_LABEL = {'color': PALETTE['text'], 'fontSize': '13px', 'fontWeight': '500',
+          'display': 'block', 'marginBottom': '6px', 'letterSpacing': '0.1px'}
+_LABEL_OPT = {'color': PALETTE['text_muted'], 'fontSize': '12px', 'fontWeight': '400',
+              'display': 'block', 'marginBottom': '6px'}
+_INPUT = {'width': '100%', 'backgroundColor': '#1E2D42', 'border': f"1px solid {PALETTE['border']}",
+          'color': PALETTE['text'], 'borderRadius': '6px', 'padding': '9px 12px',
+          'fontSize': '13px', 'fontFamily': "'JetBrains Mono', monospace",
+          'transition': 'border-color 0.15s ease'}
+
+def _opt_badge():
+    return html.Span("optionnel", style={
+        'fontSize': '10px', 'fontWeight': '600', 'letterSpacing': '0.5px',
+        'color': PALETTE['text_muted'], 'backgroundColor': PALETTE['surface2'],
+        'border': f"1px solid {PALETTE['border']}", 'borderRadius': '3px',
+        'padding': '1px 5px', 'marginLeft': '6px', 'verticalAlign': 'middle',
+    })
+
+def _field_label(text, optional=False):
+    return html.Div([
+        html.Span(text, style=_LABEL if not optional else _LABEL_OPT),
+        _opt_badge() if optional else None,
+    ], style={'marginBottom': '6px', 'display': 'flex', 'alignItems': 'center'})
 
 PAGE_MODELISATION = html.Div([
     html.Div([
@@ -855,43 +1026,61 @@ PAGE_MODELISATION = html.Div([
         html.Div([
             card([
                 section_title("Configuration"),
-                html.Label("Fichier (Excel / CSV)", style={'color': PALETTE['text_muted'], 'fontSize': '12px', 'display': 'block', 'marginBottom': '8px'}),
+
+                # Upload zone
+                html.Div("Fichier de données", style=_LABEL),
                 dcc.Upload(id='upload-data', children=html.Div([
-                    html.Div("↑", style={'fontSize': '28px', 'color': PALETTE['accent']}),
-                    html.Div("Glisser-déposer ou cliquer", style={'fontSize': '13px', 'color': PALETTE['text_muted']}),
-                ], style={'textAlign': 'center'}), style={
+                    html.Div("↑", style={'fontSize': '24px', 'color': PALETTE['accent'], 'lineHeight': '1'}),
+                    html.Div("Glisser-déposer ou cliquer", style={'fontSize': '12px', 'color': PALETTE['text_muted'], 'marginTop': '4px'}),
+                    html.Div("Excel (.xlsx) ou CSV", style={'fontSize': '11px', 'color': PALETTE['border'], 'marginTop': '2px'}),
+                ], style={'textAlign': 'center', 'padding': '4px 0'}), style={
                     'border': f"2px dashed {PALETTE['border']}", 'borderRadius': '8px',
-                    'padding': '20px', 'cursor': 'pointer', 'marginBottom': '8px',
+                    'padding': '18px 12px', 'cursor': 'pointer', 'marginBottom': '6px',
                     'backgroundColor': PALETTE['surface2'],
+                    'transition': 'border-color 0.2s ease',
                 }),
-                html.Div(id='upload-status', style={'color': PALETTE['success'], 'fontSize': '12px', 'marginBottom': '16px'}),
+                html.Div(id='upload-status', style={
+                    'color': PALETTE['success'], 'fontSize': '12px',
+                    'marginBottom': '20px', 'minHeight': '16px',
+                }),
 
-                html.Label("Colonne des montants", style={'color': PALETTE['text_muted'], 'fontSize': '12px', 'display': 'block', 'marginBottom': '6px'}),
-                dcc.Dropdown(id='column-name', options=[], placeholder='Sélectionner…',
-                             style={'marginBottom': '14px'},
-                             className='dark-dropdown'),
+                # Séparateur
+                html.Hr(style={'border': 'none', 'borderTop': f"1px solid {PALETTE['border']}", 'margin': '0 0 16px 0'}),
 
-                html.Label("Colonne de date (optionnel)", style={'color': PALETTE['text_muted'], 'fontSize': '12px', 'display': 'block', 'marginBottom': '6px'}),
-                dcc.Dropdown(id='date-column', options=[], placeholder='Pour l\'analyse de fréquence',
-                             style={'marginBottom': '14px'}),
+                _field_label("Colonne des montants"),
+                dcc.Dropdown(id='column-name', options=[], placeholder='Sélectionner une colonne…',
+                             style={'marginBottom': '16px'}, className='dark-dropdown'),
 
-                html.Label("Année de départ (optionnel)", style={'color': PALETTE['text_muted'], 'fontSize': '12px', 'display': 'block', 'marginBottom': '6px'}),
-                dcc.Input(id='start-date-input', type='number', placeholder='ex: 2015', min=1900, max=2100,
-                          style={'width': '100%', 'backgroundColor': PALETTE['surface2'], 'border': f"1px solid {PALETTE['border']}",
-                                 'color': PALETTE['text'], 'borderRadius': '6px', 'padding': '8px 12px', 'marginBottom': '14px',
-                                 'fontSize': '13px', 'fontFamily': "'JetBrains Mono', monospace"}),
+                # Champs optionnels groupés
+                html.Div([
+                    html.Div("Analyse de fréquence", style={
+                        'fontSize': '10px', 'fontWeight': '700', 'letterSpacing': '1.5px',
+                        'color': PALETTE['text_muted'], 'textTransform': 'uppercase',
+                        'marginBottom': '10px',
+                    }),
+                    _field_label("Colonne de date", optional=True),
+                    dcc.Dropdown(id='date-column', options=[], placeholder='Aucune',
+                                 style={'marginBottom': '12px'}),
+                    _field_label("Année de départ", optional=True),
+                    dcc.Input(id='start-date-input', type='number', placeholder='ex : 2015',
+                              min=1900, max=2100, style={**_INPUT, 'marginBottom': '4px'}),
+                ], style={
+                    'backgroundColor': PALETTE['surface2'], 'borderRadius': '8px',
+                    'border': f"1px solid {PALETTE['border']}", 'padding': '14px',
+                    'marginBottom': '16px',
+                }),
 
-                html.Label("Seuil de séparation", style={'color': PALETTE['text_muted'], 'fontSize': '12px', 'display': 'block', 'marginBottom': '6px'}),
+                _field_label("Seuil de séparation (€)"),
+                html.Div("Sinistres en-dessous = attritionnels, au-dessus = graves",
+                         style={'fontSize': '11px', 'color': PALETTE['text_muted'], 'marginBottom': '6px'}),
                 dcc.Input(id='threshold', type='number', value=30000,
-                          style={'width': '100%', 'backgroundColor': PALETTE['surface2'], 'border': f"1px solid {PALETTE['border']}",
-                                 'color': PALETTE['text'], 'borderRadius': '6px', 'padding': '8px 12px', 'marginBottom': '20px',
-                                 'fontSize': '13px', 'fontFamily': "'JetBrains Mono', monospace"}),
+                          style={**_INPUT, 'marginBottom': '20px'}),
 
-                btn_primary("▶  Analyser", id='analyze-button'),
+                btn_primary("▶  Lancer l'analyse", id='analyze-button'),
             ], style={'marginBottom': '16px'}),
 
             html.Div(id='data-info-card'),
-        ], style={'width': '280px', 'flexShrink': '0'}),
+        ], style={'width': '290px', 'flexShrink': '0'}),
 
         # COLONNE DROITE - Résultats
         html.Div([
@@ -1389,34 +1578,57 @@ def render_threshold_preview(below_data, above_data, threshold):
     if total == 0:
         return html.Div()
 
+    # Calcul d'un nombre de bins adapté à la taille des données
+    n_bins_below = min(50, max(15, len(below) // 20)) if len(below) > 0 else 30
+    n_bins_above = min(40, max(10, len(above) // 10)) if len(above) > 0 else 20
+
     fig = go.Figure()
     if len(below) > 0:
         fig.add_trace(go.Histogram(
-            x=below, nbinsx=60, histnorm='',
-            name=f"Attritionnels — {len(below):,} sin. ({len(below)/total*100:.0f}%)",
-            marker_color='rgba(6,214,160,0.45)', marker_line_color=PALETTE['success'], marker_line_width=0.6,
+            x=below, nbinsx=n_bins_below, histnorm='',
+            name=f"Attritionnels  {len(below):,} sin. ({len(below)/total*100:.0f}%)",
+            marker_color='rgba(16,185,129,0.40)',
+            marker_line_color='rgba(16,185,129,0.85)', marker_line_width=0.8,
         ))
     if len(above) > 0:
         fig.add_trace(go.Histogram(
-            x=above, nbinsx=40, histnorm='',
-            name=f"Graves — {len(above):,} sin. ({len(above)/total*100:.0f}%)",
-            marker_color='rgba(255,77,109,0.45)', marker_line_color=PALETTE['danger'], marker_line_width=0.6,
+            x=above, nbinsx=n_bins_above, histnorm='',
+            name=f"Graves  {len(above):,} sin. ({len(above)/total*100:.0f}%)",
+            marker_color='rgba(239,68,68,0.40)',
+            marker_line_color='rgba(239,68,68,0.85)', marker_line_width=0.8,
         ))
     if threshold:
-        fig.add_vline(x=threshold, line_dash='dash', line_color=PALETTE['warning'], line_width=2,
-                      annotation_text=f"Seuil : {threshold:,} €",
-                      annotation_font_color=PALETTE['warning'], annotation_bgcolor=PALETTE['surface'],
-                      annotation_position="top right")
-    layout = plotly_layout(f"Aperçu — {total:,} sinistres", height=200)
-    layout['xaxis']['title'] = "Montant (€)"
-    layout['yaxis']['title'] = "Fréquence"
+        fig.add_vline(
+            x=threshold, line_dash='dash', line_color=PALETTE['warning'], line_width=2,
+            annotation=dict(
+                text=f"<b>Seuil : {threshold:,.0f} €</b>",
+                font=dict(color=PALETTE['warning'], size=12),
+                bgcolor=PALETTE['surface2'],
+                bordercolor=PALETTE['warning'],
+                borderwidth=1,
+                borderpad=4,
+            ),
+            annotation_position="top right",
+        )
+
+    layout = plotly_layout(f"Répartition des {total:,} sinistres — aperçu du seuil", height=290)
+    layout['xaxis']['title'] = "Montant du sinistre (€)"
+    layout['xaxis']['tickformat'] = ',.0f'
+    layout['xaxis']['ticksuffix'] = ' €'
+    layout['xaxis']['exponentformat'] = 'none'
+    layout['yaxis']['title'] = "Nombre de sinistres"
     layout['barmode'] = 'overlay'
-    layout['margin'] = dict(l=50, r=30, t=40, b=40)
-    layout['legend'] = dict(bgcolor=PALETTE['surface'], bordercolor=PALETTE['border'], borderwidth=1,
-                            font=dict(color=PALETTE['text']), orientation='h', yanchor='bottom', y=1.02, x=0)
+    layout['margin'] = dict(l=72, r=28, t=52, b=80)
+    layout['legend'] = dict(
+        bgcolor='rgba(22,32,50,0.95)', bordercolor=PALETTE['border'], borderwidth=1,
+        font=dict(color=PALETTE['text'], size=11), orientation='h',
+        yanchor='top', y=-0.22, x=0,
+    )
     fig.update_layout(layout)
-    return card([dcc.Graph(figure=fig, config={'displayModeBar': False})],
-                style={'marginBottom': '16px', 'padding': '12px 20px'})
+    return card(
+        [dcc.Graph(figure=fig, config={'displayModeBar': True, 'modeBarButtonsToRemove': ['select2d','lasso2d','autoScale2d']})],
+        style={'marginBottom': '16px', 'padding': '16px 20px 8px 20px'}
+    )
 
 # ============================================================
 # CALLBACKS RÉASSURANCE
@@ -1666,8 +1878,12 @@ def r_render_visuals(progs, std_min, std_max):
                                  marker=dict(size=10, color=PALETTE['text_muted'], line=dict(width=1, color=PALETTE['border'])),
                                  textfont=dict(color=PALETTE['text_muted'], size=10)))
     layout = plotly_layout("Frontière Efficace — Espérance vs Écart-type", height=500)
-    layout['xaxis']['title'] = "Espérance (€)"
-    layout['yaxis']['title'] = "Écart-type (€)"
+    layout['xaxis']['title'] = "Espérance de la charge nette (€)"
+    layout['xaxis']['tickformat'] = ',.0f'
+    layout['xaxis']['exponentformat'] = 'none'
+    layout['yaxis']['title'] = "Écart-type de la charge nette (€)"
+    layout['yaxis']['tickformat'] = ',.0f'
+    layout['yaxis']['exponentformat'] = 'none'
     fig.update_layout(layout)
 
     def creer_table_reas(df):
