@@ -895,63 +895,124 @@ PAGE_MODELISATION = html.Div([
 
         # COLONNE DROITE - Résultats
         html.Div([
-            # SEGMENT SOUS LE SEUIL - Sévérité
-            card([
-                html.Div([
-                    html.Div("▼", style={'color': PALETTE['success'], 'marginRight': '8px', 'fontSize': '18px'}),
-                    html.Span("Sévérité — Sinistres SOUS le seuil", style={'color': PALETTE['success'], 'fontWeight': '700', 'fontSize': '15px', 'letterSpacing': '1px'}),
-                ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '16px'}),
-                dcc.Tabs(id='below-tabs', value='below-details', children=[
-                    dcc.Tab(label='Paramètres', value='below-details'),
-                    dcc.Tab(label='ECDF & Critères', value='below-ecdf-criteria'),
-                    dcc.Tab(label='QQ & Quantiles', value='below-qq-quantiles'),
-                    dcc.Tab(label='Histogramme', value='below-histogram'),
-                ], colors={"border": PALETTE['border'], "primary": PALETTE['accent'], "background": PALETTE['surface2']}),
-                html.Div(id='below-content', style={'minHeight': '300px', 'paddingTop': '20px'}),
-            ], style={'marginBottom': '16px', 'borderLeft': f"3px solid {PALETTE['success']}"}),
+            # Aperçu distribution + seuil (visible après Analyser)
+            html.Div(id='threshold-preview-container'),
 
-            # SEGMENT SOUS LE SEUIL - Fréquence
+            # Navigation principale : SOUS LE SEUIL / AU-DESSUS DU SEUIL
             card([
-                html.Div([
-                    html.Div("∿", style={'color': PALETTE['below_freq'], 'marginRight': '8px', 'fontSize': '22px'}),
-                    html.Span("Fréquence — Sinistres SOUS le seuil", style={'color': PALETTE['below_freq'], 'fontWeight': '700', 'fontSize': '15px', 'letterSpacing': '1px'}),
-                ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '16px'}),
-                dcc.Tabs(id='below-freq-tabs', value='below-freq-details', children=[
-                    dcc.Tab(label='Paramètres', value='below-freq-details'),
-                    dcc.Tab(label='CDF & Critères', value='below-freq-cmf'),
-                    dcc.Tab(label='Série temporelle', value='below-freq-ts'),
-                ], colors={"border": PALETTE['border'], "primary": PALETTE['below_freq'], "background": PALETTE['surface2']}),
-                html.Div(id='below-freq-content', style={'minHeight': '300px', 'paddingTop': '20px'}),
-            ], style={'marginBottom': '16px', 'borderLeft': f"3px solid {PALETTE['below_freq']}"}),
+                dcc.Tabs(id='segment-tabs', value='segment-below', children=[
 
-            # SEGMENT AU-DESSUS DU SEUIL - Sévérité
-            card([
-                html.Div([
-                    html.Div("▲", style={'color': PALETTE['danger'], 'marginRight': '8px', 'fontSize': '18px'}),
-                    html.Span("Sévérité — Sinistres AU-DESSUS du seuil", style={'color': PALETTE['danger'], 'fontWeight': '700', 'fontSize': '15px', 'letterSpacing': '1px'}),
-                ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '16px'}),
-                dcc.Tabs(id='above-tabs', value='above-details', children=[
-                    dcc.Tab(label='Paramètres', value='above-details'),
-                    dcc.Tab(label='ECDF & Critères', value='above-ecdf-criteria'),
-                    dcc.Tab(label='QQ & Quantiles', value='above-qq-quantiles'),
-                    dcc.Tab(label='Histogramme', value='above-histogram'),
-                ], colors={"border": PALETTE['border'], "primary": PALETTE['danger'], "background": PALETTE['surface2']}),
-                html.Div(id='above-content', style={'minHeight': '300px', 'paddingTop': '20px'}),
-            ], style={'marginBottom': '16px', 'borderLeft': f"3px solid {PALETTE['danger']}"}),
+                    # ── SOUS LE SEUIL ────────────────────────────────────────
+                    dcc.Tab(label='▼  SOUS LE SEUIL', value='segment-below',
+                            style={'color': PALETTE['text_muted'], 'backgroundColor': PALETTE['surface'],
+                                   'padding': '12px 28px', 'borderColor': PALETTE['border']},
+                            selected_style={'color': PALETTE['success'], 'fontWeight': '700',
+                                           'backgroundColor': PALETTE['surface2'],
+                                           'borderTop': f"3px solid {PALETTE['success']}",
+                                           'padding': '12px 28px', 'borderColor': PALETTE['border']},
+                            children=[
+                                dcc.Tabs(id='below-type-tabs', value='below-sev',
+                                         style={'marginTop': '18px'},
+                                         colors={"border": PALETTE['border'], "primary": PALETTE['success'],
+                                                 "background": PALETTE['surface2']},
+                                         children=[
+                                    dcc.Tab(label='📊  Sévérité', value='below-sev',
+                                            style={'color': PALETTE['text_muted'], 'fontSize': '13px',
+                                                   'backgroundColor': PALETTE['surface2'], 'padding': '8px 18px'},
+                                            selected_style={'color': PALETTE['success'], 'fontWeight': '700',
+                                                           'fontSize': '13px', 'backgroundColor': PALETTE['surface'],
+                                                           'borderTop': f"2px solid {PALETTE['success']}",
+                                                           'padding': '8px 18px'},
+                                            children=[html.Div(style={'paddingTop': '14px'}, children=[
+                                                dcc.Tabs(id='below-tabs', value='below-details', children=[
+                                                    dcc.Tab(label='Paramètres',      value='below-details'),
+                                                    dcc.Tab(label='ECDF & Critères', value='below-ecdf-criteria'),
+                                                    dcc.Tab(label='QQ & Quantiles',  value='below-qq-quantiles'),
+                                                    dcc.Tab(label='Histogramme',     value='below-histogram'),
+                                                ], colors={"border": PALETTE['border'], "primary": PALETTE['accent'],
+                                                           "background": PALETTE['surface2']}),
+                                                dcc.Loading(
+                                                    html.Div(id='below-content', style={'minHeight': '320px', 'paddingTop': '20px'}),
+                                                    color=PALETTE['accent'], type='dot'),
+                                            ])]),
+                                    dcc.Tab(label='📈  Fréquence', value='below-freq',
+                                            style={'color': PALETTE['text_muted'], 'fontSize': '13px',
+                                                   'backgroundColor': PALETTE['surface2'], 'padding': '8px 18px'},
+                                            selected_style={'color': PALETTE['below_freq'], 'fontWeight': '700',
+                                                           'fontSize': '13px', 'backgroundColor': PALETTE['surface'],
+                                                           'borderTop': f"2px solid {PALETTE['below_freq']}",
+                                                           'padding': '8px 18px'},
+                                            children=[html.Div(style={'paddingTop': '14px'}, children=[
+                                                dcc.Tabs(id='below-freq-tabs', value='below-freq-details', children=[
+                                                    dcc.Tab(label='Paramètres',       value='below-freq-details'),
+                                                    dcc.Tab(label='CDF & Critères',   value='below-freq-cmf'),
+                                                    dcc.Tab(label='Série temporelle', value='below-freq-ts'),
+                                                ], colors={"border": PALETTE['border'], "primary": PALETTE['below_freq'],
+                                                           "background": PALETTE['surface2']}),
+                                                dcc.Loading(
+                                                    html.Div(id='below-freq-content', style={'minHeight': '320px', 'paddingTop': '20px'}),
+                                                    color=PALETTE['below_freq'], type='dot'),
+                                            ])]),
+                                ]),
+                            ]),
 
-            # SEGMENT AU-DESSUS DU SEUIL - Fréquence
-            card([
-                html.Div([
-                    html.Div("∿", style={'color': PALETTE['above_freq'], 'marginRight': '8px', 'fontSize': '22px'}),
-                    html.Span("Fréquence — Sinistres AU-DESSUS du seuil", style={'color': PALETTE['above_freq'], 'fontWeight': '700', 'fontSize': '15px', 'letterSpacing': '1px'}),
-                ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '16px'}),
-                dcc.Tabs(id='above-freq-tabs', value='above-freq-details', children=[
-                    dcc.Tab(label='Paramètres', value='above-freq-details'),
-                    dcc.Tab(label='CDF & Critères', value='above-freq-cmf'),
-                    dcc.Tab(label='Série temporelle', value='above-freq-ts'),
-                ], colors={"border": PALETTE['border'], "primary": PALETTE['above_freq'], "background": PALETTE['surface2']}),
-                html.Div(id='above-freq-content', style={'minHeight': '300px', 'paddingTop': '20px'}),
-            ], style={'borderLeft': f"3px solid {PALETTE['above_freq']}"}),
+                    # ── AU-DESSUS DU SEUIL ────────────────────────────────────
+                    dcc.Tab(label='▲  AU-DESSUS DU SEUIL', value='segment-above',
+                            style={'color': PALETTE['text_muted'], 'backgroundColor': PALETTE['surface'],
+                                   'padding': '12px 28px', 'borderColor': PALETTE['border']},
+                            selected_style={'color': PALETTE['danger'], 'fontWeight': '700',
+                                           'backgroundColor': PALETTE['surface2'],
+                                           'borderTop': f"3px solid {PALETTE['danger']}",
+                                           'padding': '12px 28px', 'borderColor': PALETTE['border']},
+                            children=[
+                                dcc.Tabs(id='above-type-tabs', value='above-sev',
+                                         style={'marginTop': '18px'},
+                                         colors={"border": PALETTE['border'], "primary": PALETTE['danger'],
+                                                 "background": PALETTE['surface2']},
+                                         children=[
+                                    dcc.Tab(label='📊  Sévérité', value='above-sev',
+                                            style={'color': PALETTE['text_muted'], 'fontSize': '13px',
+                                                   'backgroundColor': PALETTE['surface2'], 'padding': '8px 18px'},
+                                            selected_style={'color': PALETTE['danger'], 'fontWeight': '700',
+                                                           'fontSize': '13px', 'backgroundColor': PALETTE['surface'],
+                                                           'borderTop': f"2px solid {PALETTE['danger']}",
+                                                           'padding': '8px 18px'},
+                                            children=[html.Div(style={'paddingTop': '14px'}, children=[
+                                                dcc.Tabs(id='above-tabs', value='above-details', children=[
+                                                    dcc.Tab(label='Paramètres',      value='above-details'),
+                                                    dcc.Tab(label='ECDF & Critères', value='above-ecdf-criteria'),
+                                                    dcc.Tab(label='QQ & Quantiles',  value='above-qq-quantiles'),
+                                                    dcc.Tab(label='Histogramme',     value='above-histogram'),
+                                                ], colors={"border": PALETTE['border'], "primary": PALETTE['danger'],
+                                                           "background": PALETTE['surface2']}),
+                                                dcc.Loading(
+                                                    html.Div(id='above-content', style={'minHeight': '320px', 'paddingTop': '20px'}),
+                                                    color=PALETTE['danger'], type='dot'),
+                                            ])]),
+                                    dcc.Tab(label='📈  Fréquence', value='above-freq',
+                                            style={'color': PALETTE['text_muted'], 'fontSize': '13px',
+                                                   'backgroundColor': PALETTE['surface2'], 'padding': '8px 18px'},
+                                            selected_style={'color': PALETTE['above_freq'], 'fontWeight': '700',
+                                                           'fontSize': '13px', 'backgroundColor': PALETTE['surface'],
+                                                           'borderTop': f"2px solid {PALETTE['above_freq']}",
+                                                           'padding': '8px 18px'},
+                                            children=[html.Div(style={'paddingTop': '14px'}, children=[
+                                                dcc.Tabs(id='above-freq-tabs', value='above-freq-details', children=[
+                                                    dcc.Tab(label='Paramètres',       value='above-freq-details'),
+                                                    dcc.Tab(label='CDF & Critères',   value='above-freq-cmf'),
+                                                    dcc.Tab(label='Série temporelle', value='above-freq-ts'),
+                                                ], colors={"border": PALETTE['border'], "primary": PALETTE['above_freq'],
+                                                           "background": PALETTE['surface2']}),
+                                                dcc.Loading(
+                                                    html.Div(id='above-freq-content', style={'minHeight': '320px', 'paddingTop': '20px'}),
+                                                    color=PALETTE['above_freq'], type='dot'),
+                                            ])]),
+                                ]),
+                            ]),
+
+                ], colors={"border": PALETTE['border'], "primary": PALETTE['accent'],
+                           "background": PALETTE['surface']}),
+            ]),
         ], style={'flex': '1', 'minWidth': '0'}),
 
     ], style={'display': 'flex', 'gap': '20px', 'padding': '24px', 'maxWidth': '1600px', 'margin': '0 auto'}),
@@ -1100,8 +1161,13 @@ PAGE_REASSURANCE = html.Div([
             ], style={'marginBottom': '16px'}),
 
             card([
+                section_title("Comparaison ESP / VaR 95% / VaR 99% / TVaR 99%", PALETTE['accent2']),
+                dcc.Loading(dcc.Graph(id='r-metrics-graph'), color=PALETTE['accent2'], type='dot'),
+            ], style={'marginBottom': '16px'}),
+
+            card([
                 section_title("Tous les programmes testés"),
-                html.Div(id='r-programs-table-container'),
+                dcc.Loading(html.Div(id='r-programs-table-container'), color=PALETTE['accent'], type='dot'),
             ], style={'marginBottom': '16px'}),
 
             card([
@@ -1309,6 +1375,49 @@ def render_above_freq(tab, store):
     elif tab == 'above-freq-cmf': return view_freq_cmf(c, f, l)
     elif tab == 'above-freq-ts': return view_freq_ts(c, f, l)
 
+@app.callback(
+    Output('threshold-preview-container', 'children'),
+    [Input('below-data-store', 'data'), Input('above-data-store', 'data'), Input('threshold', 'value')]
+)
+def render_threshold_preview(below_data, above_data, threshold):
+    """Histogramme bicolore montrant la répartition des sinistres autour du seuil."""
+    if below_data is None and above_data is None:
+        return html.Div()
+    below = np.array(below_data or [])
+    above = np.array(above_data or [])
+    total = len(below) + len(above)
+    if total == 0:
+        return html.Div()
+
+    fig = go.Figure()
+    if len(below) > 0:
+        fig.add_trace(go.Histogram(
+            x=below, nbinsx=60, histnorm='',
+            name=f"Attritionnels — {len(below):,} sin. ({len(below)/total*100:.0f}%)",
+            marker_color='rgba(6,214,160,0.45)', marker_line_color=PALETTE['success'], marker_line_width=0.6,
+        ))
+    if len(above) > 0:
+        fig.add_trace(go.Histogram(
+            x=above, nbinsx=40, histnorm='',
+            name=f"Graves — {len(above):,} sin. ({len(above)/total*100:.0f}%)",
+            marker_color='rgba(255,77,109,0.45)', marker_line_color=PALETTE['danger'], marker_line_width=0.6,
+        ))
+    if threshold:
+        fig.add_vline(x=threshold, line_dash='dash', line_color=PALETTE['warning'], line_width=2,
+                      annotation_text=f"Seuil : {threshold:,} €",
+                      annotation_font_color=PALETTE['warning'], annotation_bgcolor=PALETTE['surface'],
+                      annotation_position="top right")
+    layout = plotly_layout(f"Aperçu — {total:,} sinistres", height=200)
+    layout['xaxis']['title'] = "Montant (€)"
+    layout['yaxis']['title'] = "Fréquence"
+    layout['barmode'] = 'overlay'
+    layout['margin'] = dict(l=50, r=30, t=40, b=40)
+    layout['legend'] = dict(bgcolor=PALETTE['surface'], bordercolor=PALETTE['border'], borderwidth=1,
+                            font=dict(color=PALETTE['text']), orientation='h', yanchor='bottom', y=1.02, x=0)
+    fig.update_layout(layout)
+    return card([dcc.Graph(figure=fig, config={'displayModeBar': False})],
+                style={'marginBottom': '16px', 'padding': '12px 20px'})
+
 # ============================================================
 # CALLBACKS RÉASSURANCE
 # ============================================================
@@ -1508,15 +1617,18 @@ def r_manage_programs(n_save, n_del, n_reset, stack, name, saved, sims, prog_to_
 
 @app.callback(
     [Output('r-frontiere-graph', 'figure'),
+     Output('r-metrics-graph', 'figure'),
      Output('r-programs-table-container', 'children'),
      Output('r-filtered-programs-table-container', 'children')],
     [Input('r-saved-programs-store', 'data'), Input('r-std-min', 'value'), Input('r-std-max', 'value')]
 )
 def r_render_visuals(progs, std_min, std_max):
+    empty_metrics = go.Figure()
+    empty_metrics.update_layout(plotly_layout("Comparaison des indicateurs — générez d'abord les simulations"))
     if not progs:
         empty_fig = go.Figure()
         empty_fig.update_layout(plotly_layout("Frontière Efficace — Espérance vs Écart-type"))
-        return empty_fig, html.Div("Aucun programme.", style={'color': PALETTE['text_muted']}), html.Div()
+        return empty_fig, empty_metrics, html.Div("Aucun programme.", style={'color': PALETTE['text_muted']}), html.Div()
 
     df_p = pd.DataFrame(progs)
     brut = df_p[df_p['id'] == 'brut']
@@ -1561,9 +1673,26 @@ def r_render_visuals(progs, std_min, std_max):
     def creer_table_reas(df):
         if df.empty: return html.Div("Aucun programme.", style={'color': PALETTE['text_muted']})
         rows = df.copy()
+        brut_vals = {}
+        brut_mask = rows['id'] == 'brut'
+        if brut_mask.any():
+            for col in ['esp', 'std', 'var95', 'var99', 'tvar99']:
+                if col in rows.columns:
+                    brut_vals[col] = rows.loc[brut_mask, col].values[0]
+
+        def fmt(val, ref, is_brut):
+            if pd.isna(val): return 'N/A'
+            base = f"{val:,.0f} €"
+            if is_brut or not ref or ref == 0: return base
+            pct = (val - ref) / ref * 100
+            arrow = "▼" if pct < 0 else "▲"
+            return f"{base}  {arrow}{abs(pct):.1f}%"
+
         for col in ['esp', 'std', 'var95', 'var99', 'tvar99']:
             if col in rows.columns:
-                rows[col] = rows[col].apply(lambda x: f"{x:,.0f} €" if pd.notna(x) else 'N/A')
+                ref = brut_vals.get(col)
+                rows[col] = rows.apply(lambda r, c=col, rv=ref: fmt(r[c], rv, r['id'] == 'brut'), axis=1)
+
         base_cols = [{'name': 'Programme', 'id': 'name'}, {'name': 'Structure', 'id': 'desc'},
                      {'name': 'Espérance', 'id': 'esp'}, {'name': 'Écart-type', 'id': 'std'}]
         extra_cols = [{'name': 'VaR 95%', 'id': 'var95'}, {'name': 'VaR 99%', 'id': 'var99'},
@@ -1576,7 +1705,27 @@ def r_render_visuals(progs, std_min, std_max):
         "Définissez un écart-type Min/Max pour filtrer les résultats.",
         style={'color': PALETTE['text_muted'], 'fontSize': '13px'})
 
-    return fig, table_all, table_filtered
+    # ── Graphique de comparaison des indicateurs ──────────────
+    metrics_fig = go.Figure()
+    metric_cols   = ['esp',           'var95',             'var99',           'tvar99']
+    metric_labels = ['Espérance',     'VaR 95%',           'VaR 99%',         'TVaR 99%']
+    metric_colors = [PALETTE['accent2'], PALETTE['warning'], PALETTE['danger'], '#C0392B']
+    for col, label, color in zip(metric_cols, metric_labels, metric_colors):
+        if col in df_p.columns:
+            metrics_fig.add_trace(go.Bar(
+                name=label, x=df_p['name'], y=df_p[col],
+                marker_color=color, opacity=0.85,
+                text=df_p[col].apply(lambda v: f"{v/1000:.0f}k" if pd.notna(v) else ''),
+                textposition='outside', textfont=dict(size=10, color=PALETTE['text']),
+            ))
+    m_layout = plotly_layout("Comparaison ESP / VaR 95% / VaR 99% / TVaR 99% par programme", height=360)
+    m_layout['xaxis']['title'] = "Programme"
+    m_layout['yaxis']['title'] = "Montant (€)"
+    m_layout['barmode'] = 'group'
+    m_layout['uniformtext'] = dict(mode='hide', minsize=9)
+    metrics_fig.update_layout(m_layout)
+
+    return fig, metrics_fig, table_all, table_filtered
 
 if __name__ == '__main__':
     print("Lancement sur http://127.0.0.1:8050")
