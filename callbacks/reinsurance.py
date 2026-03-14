@@ -1,24 +1,44 @@
 from server import app
-from dash import Input, Output, State, callback_context, html
+from dash import Input, Output, State, callback_context, html, dash_table
 import dash
 import numpy as np
 import pandas as pd
 import plotly.graph_objs as go
+from plotly.subplots import make_subplots
 
 from config import PALETTE, SEV_DIST_NAMES, FREQ_DIST_NAMES
 from backend.reinsurance import (
     simuler_depuis_distributions, stats_programme, formater_description,
-    compute_ceded_charges, compute_oep_curve, compute_heatmap,
+    compute_ceded_charges, compute_oep_curve, compute_heatmap, compute_charges,
 )
-from components.ui import make_table, plotly_layout
+from components.ui import plotly_layout
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# HELPERS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 def _best_dist(fits_dict):
     if not fits_dict:
         return None
     return min(fits_dict.items(), key=lambda x: x[1].get('aic', 9999))[0]
+
+
+def _fmt_eur(v):
+    if v is None or (isinstance(v, float) and np.isnan(v)):
+        return 'N/A'
+    if abs(v) >= 1_000_000:
+        return f"{v / 1_000_000:.2f}M €"
+    if abs(v) >= 1_000:
+        return f"{v / 1_000:.0f}k €"
+    return f"{v:.0f} €"
+
+
+def _pct_reduction(val, ref):
+    """Return % reduction of val vs ref (positive = good = reduction)."""
+    if ref is None or ref == 0:
+        return 0.0
+    return (ref - val) / ref * 100
 
 
 def _make_law_row(label, dist_key, label_map, color):
@@ -39,26 +59,37 @@ def _make_law_row(label, dist_key, label_map, color):
     ], style={'marginBottom': '6px'})
 
 
-def _fmt_eur(v):
-    if pd.isna(v) or v is None:
-        return 'N/A'
-    if abs(v) >= 1_000_000:
-        return f"{v/1_000_000:.2f}M €"
-    if abs(v) >= 1_000:
-        return f"{v/1_000:.0f}k €"
-    return f"{v:.0f} €"
+def _kpi_card(label, value, sub=None, color=None, border=None):
+    c = color or PALETTE['text']
+    b = border or PALETTE['border']
+    return html.Div([
+        html.Div(value, style={
+            'fontSize': '20px', 'fontWeight': '700', 'color': c,
+            'fontFamily': "'JetBrains Mono', monospace",
+            'letterSpacing': '-0.5px', 'lineHeight': '1.2',
+        }),
+        html.Div(label, style={
+            'fontSize': '10px', 'color': PALETTE['text_muted'],
+            'letterSpacing': '0.8px', 'textTransform': 'uppercase',
+            'marginTop': '5px', 'fontWeight': '600',
+        }),
+        html.Div(sub or '', style={
+            'fontSize': '11px', 'color': PALETTE['text_muted'],
+            'marginTop': '3px', 'lineHeight': '1.3',
+        }),
+    ], style={
+        'backgroundColor': PALETTE['surface'],
+        'border': f"1px solid {b}44",
+        'borderLeft': f"3px solid {b}",
+        'borderRadius': '8px',
+        'padding': '14px 18px',
+        'flex': '1',
+    })
 
 
-def _fmt_pct(val, ref):
-    if ref is None or ref == 0:
-        return ''
-    pct = (val - ref) / ref * 100
-    arrow = "▼" if pct < 0 else "▲"
-    color_hint = "▼" if pct < 0 else "▲"
-    return f"  {color_hint}{abs(pct):.1f}%"
-
-
-# ── Banner ────────────────────────────────────────────────────────────────────
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# BANNER
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @app.callback(
     Output('r-model-status-banner', 'children'),
@@ -72,10 +103,9 @@ def r_update_banner(below_fits, above_fits, below_freq_store, above_freq_store):
 
     if not has_model:
         return html.Div([
-            html.Span("⚠ ", style={'fontSize': '16px'}),
-            html.Span("Aucune modélisation disponible. Allez sur la page "),
+            html.Span("⚠  Aucune modélisation. Allez sur "),
             html.Strong("Modélisation", style={'color': PALETTE['accent']}),
-            html.Span(" et cliquez sur Analyser."),
+            html.Span(" → Analyser."),
         ], style={
             'backgroundColor': '#2a1f00', 'border': f"1px solid {PALETTE['warning']}",
             'borderRadius': '6px', 'padding': '10px 14px', 'marginBottom': '14px',
@@ -89,28 +119,23 @@ def r_update_banner(below_fits, above_fits, below_freq_store, above_freq_store):
 
     return html.Div([
         html.Div([
-            html.Span("✓ Lois sélectionnées par ", style={'fontSize': '12px', 'color': PALETTE['success']}),
-            html.Strong("AIC", style={'color': PALETTE['accent']}),
-        ], style={'marginBottom': '10px'}),
-        html.Div("▼  SOUS LE SEUIL", style={
-            'color': PALETTE['success'], 'fontSize': '10px', 'fontWeight': '700',
-            'letterSpacing': '1.5px', 'marginBottom': '6px',
-        }),
-        _make_law_row("Sévérité", bsd, SEV_DIST_NAMES, PALETTE['success']),
-        _make_law_row("Fréquence", bfd, FREQ_DIST_NAMES, PALETTE['below_freq']),
-        html.Div("▲  AU-DESSUS DU SEUIL", style={
-            'color': PALETTE['danger'], 'fontSize': '10px', 'fontWeight': '700',
-            'letterSpacing': '1.5px', 'marginBottom': '6px', 'marginTop': '10px',
-        }),
-        _make_law_row("Sévérité", asd, SEV_DIST_NAMES, PALETTE['danger']),
-        _make_law_row("Fréquence", afd, FREQ_DIST_NAMES, PALETTE['above_freq']),
+            html.Span("✓  Lois sélectionnées par AIC", style={'color': PALETTE['success'], 'fontSize': '11px', 'fontWeight': '600'}),
+        ], style={'marginBottom': '8px'}),
+        html.Div("↓ SOUS SEUIL", style={'color': PALETTE['success'], 'fontSize': '10px', 'fontWeight': '700', 'letterSpacing': '1px', 'marginBottom': '4px'}),
+        _make_law_row("Sév.", bsd, SEV_DIST_NAMES, PALETTE['success']),
+        _make_law_row("Fréq.", bfd, FREQ_DIST_NAMES, PALETTE['below_freq']),
+        html.Div("↑ AU-DESSUS", style={'color': PALETTE['danger'], 'fontSize': '10px', 'fontWeight': '700', 'letterSpacing': '1px', 'marginBottom': '4px', 'marginTop': '8px'}),
+        _make_law_row("Sév.", asd, SEV_DIST_NAMES, PALETTE['danger']),
+        _make_law_row("Fréq.", afd, FREQ_DIST_NAMES, PALETTE['above_freq']),
     ], style={
         'backgroundColor': '#0a1f15', 'border': f"1px solid {PALETTE['success']}44",
-        'borderRadius': '6px', 'padding': '12px 14px', 'marginBottom': '14px',
+        'borderRadius': '6px', 'padding': '10px 12px', 'marginBottom': '14px',
     })
 
 
-# ── Simulations ───────────────────────────────────────────────────────────────
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# SIMULATIONS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @app.callback(
     [Output('r-simulations-store', 'data'),
@@ -137,13 +162,13 @@ def r_run_simulations(n, n_sims, below_fits, above_fits, below_freq_store, above
     bfd = ov_bfreq or _best_dist(below_freq_fits)
     afd = ov_afreq or _best_dist(above_freq_fits)
 
-    bsev_params  = below_fits[bsd]['params']       if below_fits       and bsd and bsd in below_fits       else None
-    asev_params  = above_fits[asd]['params']        if above_fits       and asd and asd in above_fits        else None
-    bfreq_params = below_freq_fits[bfd]['params']   if below_freq_fits  and bfd and bfd in below_freq_fits   else None
-    afreq_params = above_freq_fits[afd]['params']   if above_freq_fits  and afd and afd in above_freq_fits   else None
+    bsev_params  = below_fits[bsd]['params']       if below_fits      and bsd and bsd in below_fits      else None
+    asev_params  = above_fits[asd]['params']        if above_fits      and asd and asd in above_fits       else None
+    bfreq_params = below_freq_fits[bfd]['params']   if below_freq_fits and bfd and bfd in below_freq_fits  else None
+    afreq_params = above_freq_fits[afd]['params']   if above_freq_fits and afd and afd in above_freq_fits  else None
 
     if not bsev_params and not asev_params:
-        return dash.no_update, dash.no_update, "⚠ Aucune distribution disponible. Lancez d'abord la modélisation."
+        return dash.no_update, dash.no_update, "⚠ Aucune distribution — lancez la modélisation d'abord."
 
     n_sims = int(n_sims or 5000)
     sims = simuler_depuis_distributions(
@@ -151,7 +176,6 @@ def r_run_simulations(n, n_sims, below_fits, above_fits, below_freq_store, above
     )
 
     e, s, v95, v99, tv99 = stats_programme(sims, [])
-    bc = 0.0  # Brut = aucune cession
 
     desc_parts = []
     if bsd and bsev_params:  desc_parts.append(f"Sév.↓ {SEV_DIST_NAMES.get(bsd, bsd)}")
@@ -159,20 +183,22 @@ def r_run_simulations(n, n_sims, below_fits, above_fits, below_freq_store, above
     if asd and asev_params:  desc_parts.append(f"Sév.↑ {SEV_DIST_NAMES.get(asd, asd)}")
     if afd and afreq_params: desc_parts.append(f"Fréq.↑ {FREQ_DIST_NAMES.get(afd, afd)}")
 
-    ov_flag = " [override]" if any([ov_bsev, ov_bfreq, ov_asev, ov_afreq]) else ""
-    status = f"✓ {n_sims:,} simulations générées{ov_flag}"
+    ov_flag = "  [override actif]" if any([ov_bsev, ov_bfreq, ov_asev, ov_afreq]) else ""
+    status = f"✓  {n_sims:,} simulations générées{ov_flag}"
 
     brut_entry = [{
-        'id': 'brut', 'name': 'BRUT (sans réassurance)',
+        'id': 'brut', 'name': 'BRUT',
         'esp': e, 'std': s, 'var95': v95, 'var99': v99, 'tvar99': tv99,
-        'burning_cost': bc,
-        'desc': f"Brut — {' | '.join(desc_parts)}",
+        'burning_cost': 0.0,
+        'desc': 'Sans réassurance',
         'stack': [],
     }]
     return sims, brut_entry, status
 
 
-# ── Toggle QP / XS ───────────────────────────────────────────────────────────
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# TOGGLE QP / XS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @app.callback(
     [Output('r-container-qp', 'style'), Output('r-container-xs', 'style')],
@@ -184,7 +210,9 @@ def r_toggle_inputs(t):
     return {'display': 'none'}, {'display': 'block'}
 
 
-# ── Stack de couches ──────────────────────────────────────────────────────────
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# STACK DE COUCHES
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @app.callback(
     [Output('r-current-stack-store', 'data'), Output('r-current-stack-display', 'children')],
@@ -200,6 +228,7 @@ def r_manage_stack(n_add, n_remove, t, val_qp, val_prio, val_portee, stack):
         return dash.no_update, dash.no_update
     trigger = ctx.triggered[0]['prop_id'].split('.')[0]
     new_stack = (stack or []).copy()
+
     if trigger == 'r-btn-add-layer':
         if t == 'QP':
             new_stack.append({'type': 'QP', 'taux_retention': val_qp})
@@ -207,11 +236,28 @@ def r_manage_stack(n_add, n_remove, t, val_qp, val_prio, val_portee, stack):
             new_stack.append({'type': 'XS', 'priorite': val_prio, 'portee': val_portee})
     elif trigger == 'r-btn-remove-layer' and new_stack:
         new_stack.pop()
-    desc = formater_description(new_stack) if new_stack else "Aucune couche — programme brut"
-    return new_stack, desc
+
+    if not new_stack:
+        display = html.Span("Aucune couche configurée", style={'color': PALETTE['text_muted'], 'fontStyle': 'italic'})
+    else:
+        parts = []
+        for i, t_ in enumerate(new_stack, 1):
+            if t_['type'] == 'QP':
+                parts.append(html.Div(f"Couche {i} · QP {float(t_['taux_retention'])*100:.0f}% rétention",
+                                      style={'marginBottom': '2px'}))
+            else:
+                prio_k = float(t_['priorite']) / 1000
+                portee_k = float(t_['portee']) / 1000
+                parts.append(html.Div(f"Couche {i} · XS {portee_k:.0f}k xs {prio_k:.0f}k",
+                                      style={'marginBottom': '2px'}))
+        display = html.Div(parts)
+
+    return new_stack, display
 
 
-# ── Gestion des programmes ────────────────────────────────────────────────────
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# GESTION DES PROGRAMMES
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @app.callback(
     [Output('r-saved-programs-store', 'data', allow_duplicate=True),
@@ -229,10 +275,11 @@ def r_manage_programs(n_save, n_del, n_reset, stack, name, saved, sims, prog_to_
     ctx = callback_context
     trigger = ctx.triggered[0]['prop_id'].split('.')[0]
     current = (saved or []).copy()
+    opts = [{'label': p['name'], 'value': p['id']} for p in current if p['id'] != 'brut']
 
     if trigger == 'r-btn-reset':
         current = [p for p in current if p['id'] == 'brut']
-        return current, [], [{'label': p['name'], 'value': p['id']} for p in current if p['id'] != 'brut']
+        return current, [], []
 
     if trigger == 'r-btn-delete-prog' and prog_to_del:
         current = [p for p in current if p['id'] != prog_to_del]
@@ -241,14 +288,12 @@ def r_manage_programs(n_save, n_del, n_reset, stack, name, saved, sims, prog_to_
     if trigger == 'r-btn-save-prog' and sims:
         traites = stack or []
         e, s, v95, v99, tv99 = stats_programme(sims, traites)
-        # Burning cost = cession moyenne / charge brute moyenne
         gross_arr, net_arr = compute_ceded_charges(sims, traites)
         mean_gross = float(np.mean(gross_arr))
-        ceded_arr = gross_arr - net_arr
-        bc = float(np.mean(ceded_arr) / mean_gross) if mean_gross > 0 else 0.0
+        bc = float(np.mean(gross_arr - net_arr) / mean_gross) if mean_gross > 0 else 0.0
 
         new_id = f"prog_{len(current)}_{np.random.randint(9999)}"
-        p_name = name.strip() if name and name.strip() else f"Programme {len(current)}"
+        p_name = name.strip() if name and name.strip() else f"Programme {len([p for p in current if p['id'] != 'brut']) + 1}"
         current.append({
             'id': new_id, 'name': p_name,
             'esp': e, 'std': s, 'var95': v95, 'var99': v99, 'tvar99': tv99,
@@ -258,10 +303,82 @@ def r_manage_programs(n_save, n_del, n_reset, stack, name, saved, sims, prog_to_
         })
         return current, [], [{'label': p['name'], 'value': p['id']} for p in current if p['id'] != 'brut']
 
-    return dash.no_update, dash.no_update, dash.no_update
+    return dash.no_update, dash.no_update, opts
 
 
-# ── Dropdown sélecteur de programme (Retenu/Cédé) ───────────────────────────
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# BANDE KPI — résumé exécutif toujours visible
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@app.callback(
+    Output('r-summary-kpis', 'children'),
+    Input('r-saved-programs-store', 'data')
+)
+def r_render_summary_kpis(progs):
+    if not progs:
+        return html.Div()
+
+    df = pd.DataFrame(progs)
+    brut_row = df[df['id'] == 'brut']
+    others = df[df['id'] != 'brut']
+
+    if brut_row.empty:
+        return html.Div()
+
+    brut_esp   = float(brut_row['esp'].values[0])
+    brut_var99 = float(brut_row['var99'].values[0])
+    brut_std   = float(brut_row['std'].values[0])
+    n_progs    = len(others)
+
+    cards = [
+        _kpi_card("Charge brute — ESP",     _fmt_eur(brut_esp),   "Coût moyen annuel sans réassurance", PALETTE['danger'],  PALETTE['danger']),
+        _kpi_card("Charge brute — VaR 99%", _fmt_eur(brut_var99), "Scénario 1 an sur 100",              PALETTE['danger'],  PALETTE['danger']),
+        _kpi_card("Volatilité brute (σ)",   _fmt_eur(brut_std),   "Écart-type des charges annuelles",   PALETTE['warning'], PALETTE['warning']),
+    ]
+
+    if not others.empty:
+        best = others.loc[others['var99'].idxmin()]
+        best_var99 = float(best['var99'])
+        best_esp   = float(best['esp'])
+        red_var99  = _pct_reduction(best_var99, brut_var99)
+        red_esp    = _pct_reduction(best_esp, brut_esp)
+        bc_pct     = float(best.get('burning_cost', 0) or 0) * 100
+
+        cards += [
+            _kpi_card(
+                "Meilleur programme",
+                best['name'],
+                best.get('desc', ''),
+                PALETTE['success'], PALETTE['success'],
+            ),
+            _kpi_card(
+                "Réduction VaR 99%",
+                f"−{red_var99:.1f}%",
+                f"{_fmt_eur(best_var99)}  ·  ESP −{red_esp:.1f}%",
+                PALETTE['success'], PALETTE['success'],
+            ),
+            _kpi_card(
+                "Burning Cost (meilleur)",
+                f"{bc_pct:.1f}%",
+                f"Part du brut cédée au réassureur  ·  {n_progs} programme{'s' if n_progs > 1 else ''} testé{'s' if n_progs > 1 else ''}",
+                PALETTE['accent2'], PALETTE['accent2'],
+            ),
+        ]
+    else:
+        cards.append(
+            _kpi_card("Programmes testés", "0",
+                      "Configurez un programme dans la colonne de gauche",
+                      PALETTE['text_muted'], PALETTE['border']),
+        )
+
+    return html.Div([
+        html.Div(cards, style={'display': 'flex', 'gap': '12px'}),
+    ])
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# DROPDOWN RETENU / CÉDÉ
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @app.callback(
     [Output('r-detail-prog-dropdown', 'options'),
@@ -272,10 +389,15 @@ def r_update_detail_dropdown(progs):
     if not progs:
         return [], None
     opts = [{'label': p['name'], 'value': p['id']} for p in progs]
-    return opts, progs[0]['id']
+    # Default to first non-brut program if available
+    non_brut = [p for p in progs if p['id'] != 'brut']
+    default = non_brut[0]['id'] if non_brut else progs[0]['id']
+    return opts, default
 
 
-# ── Rendu principal (frontière + indicateurs + tableaux) ─────────────────────
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# RENDU PRINCIPAL — frontière + indicateurs (% réduction) + tables
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @app.callback(
     [Output('r-frontiere-graph', 'figure'),
@@ -287,273 +409,531 @@ def r_update_detail_dropdown(progs):
      Input('r-std-max', 'value')]
 )
 def r_render_visuals(progs, std_min, std_max):
-    empty_metrics = go.Figure()
-    empty_metrics.update_layout(plotly_layout("Générez les simulations et ajoutez des programmes"))
+    _empty = go.Figure()
+    _empty.update_layout(plotly_layout("Générez les simulations et ajoutez des programmes"))
+    no_prog_msg = html.Div("Aucun programme.", style={'color': PALETTE['text_muted'], 'padding': '16px'})
+
     if not progs:
-        empty_fig = go.Figure()
-        empty_fig.update_layout(plotly_layout("Frontière Efficace — Espérance vs Écart-type"))
-        return empty_fig, empty_metrics, html.Div("Aucun programme.", style={'color': PALETTE['text_muted']}), html.Div()
+        return _empty, _empty, no_prog_msg, html.Div()
 
     df_p = pd.DataFrame(progs)
     brut = df_p[df_p['id'] == 'brut']
     others = df_p[df_p['id'] != 'brut']
+
     has_target = std_min is not None or std_max is not None
     s_min = std_min or 0
     s_max = std_max or float('inf')
 
-    df_cible = pd.DataFrame()
-    df_hors = pd.DataFrame()
     if has_target and not others.empty:
         mask = (others['std'] >= s_min) & (others['std'] <= s_max)
         df_cible = others[mask]
-        df_hors = others[~mask]
+        df_hors  = others[~mask]
     else:
         df_cible = others
+        df_hors  = pd.DataFrame()
 
-    # ── Frontière efficace ──
-    fig = go.Figure()
+    brut_esp   = float(brut['esp'].values[0])   if not brut.empty else None
+    brut_var99 = float(brut['var99'].values[0])  if not brut.empty else None
+    brut_var95 = float(brut['var95'].values[0])  if not brut.empty else None
+    brut_tvar  = float(brut['tvar99'].values[0]) if not brut.empty else None
+    brut_std   = float(brut['std'].values[0])    if not brut.empty else None
+
+    # ──────────────────────────────────────────────────────────
+    # FRONTIÈRE EFFICACE
+    # ──────────────────────────────────────────────────────────
+    fig_f = go.Figure()
+
     if has_target and std_min is not None and std_max is not None:
-        fig.add_hrect(y0=s_min, y1=s_max, line_width=0, fillcolor=PALETTE['success'], opacity=0.07, layer="below")
-        fig.add_hline(y=s_min, line_dash='dot', line_color=PALETTE['success'], opacity=0.5)
-        fig.add_hline(y=s_max, line_dash='dot', line_color=PALETTE['success'], opacity=0.5)
+        fig_f.add_hrect(y0=s_min, y1=s_max, line_width=0,
+                        fillcolor=PALETTE['success'], opacity=0.06, layer="below")
+        fig_f.add_hline(y=s_min, line_dash='dot', line_color=PALETTE['success'], opacity=0.5)
+        fig_f.add_hline(y=s_max, line_dash='dot', line_color=PALETTE['success'], opacity=0.5)
+
+    def _hover_txt(row):
+        bc = row.get('burning_cost', None)
+        bc_str = f"{bc*100:.1f}%" if bc is not None and bc > 0 else "—"
+        r99 = _pct_reduction(row['var99'], brut_var99)
+        return (
+            f"<b>{row['name']}</b><br>"
+            f"Structure : {row.get('desc','—')}<br>"
+            f"ESP : {_fmt_eur(row['esp'])}<br>"
+            f"σ : {_fmt_eur(row['std'])}<br>"
+            f"VaR 99% : {_fmt_eur(row['var99'])}  (−{r99:.1f}% vs brut)<br>"
+            f"TVaR 99% : {_fmt_eur(row['tvar99'])}<br>"
+            f"Burning cost : {bc_str}"
+            "<extra></extra>"
+        )
 
     if not brut.empty:
-        fig.add_trace(go.Scatter(
-            x=brut['esp'], y=brut['std'], mode='markers+text',
-            name="Brut", text=["BRUT"], textposition="top center",
-            marker=dict(size=18, color=PALETTE['danger'], symbol='x', line=dict(width=3, color=PALETTE['danger'])),
+        br = brut.iloc[0]
+        fig_f.add_trace(go.Scatter(
+            x=[br['esp']], y=[br['std']],
+            mode='markers+text',
+            name="BRUT",
+            text=["BRUT"],
+            textposition="top center",
+            hovertemplate=_hover_txt(br),
+            marker=dict(size=20, color=PALETTE['danger'], symbol='x',
+                        line=dict(width=3, color=PALETTE['danger'])),
             textfont=dict(color=PALETTE['danger'], size=12, family="'JetBrains Mono', monospace"),
         ))
-    if not df_cible.empty:
-        pt_color = PALETTE['success'] if has_target else PALETTE['accent2']
-        fig.add_trace(go.Scatter(
-            x=df_cible['esp'], y=df_cible['std'], mode='markers+text',
-            name="Dans la cible" if has_target else "Programmes",
-            text=df_cible['name'], textposition="top center",
-            marker=dict(size=12, color=pt_color, line=dict(width=1.5, color=PALETTE['text'])),
-            textfont=dict(color=pt_color, size=11, family="'JetBrains Mono', monospace"),
+
+    def _add_scatter(df_sub, name, color, size=12):
+        if df_sub.empty:
+            return
+        customdata = [_hover_txt(row) for _, row in df_sub.iterrows()]
+        fig_f.add_trace(go.Scatter(
+            x=df_sub['esp'], y=df_sub['std'],
+            mode='markers+text',
+            name=name,
+            text=df_sub['name'],
+            textposition="top center",
+            hovertemplate="%{customdata}",
+            customdata=customdata,
+            marker=dict(size=size, color=color, line=dict(width=1.5, color=PALETTE['surface'])),
+            textfont=dict(color=color, size=10, family="'JetBrains Mono', monospace"),
         ))
-    if not df_hors.empty:
-        fig.add_trace(go.Scatter(
-            x=df_hors['esp'], y=df_hors['std'], mode='markers+text',
-            name="Hors cible", text=df_hors['name'], textposition="top center",
-            marker=dict(size=10, color=PALETTE['text_muted'], line=dict(width=1, color=PALETTE['border'])),
-            textfont=dict(color=PALETTE['text_muted'], size=10),
-        ))
 
-    layout_f = plotly_layout("Frontière Efficace — Espérance vs Écart-type", height=480)
-    layout_f['xaxis'].update(title="Espérance de la charge nette (€)", tickformat=',.0f', exponentformat='none')
-    layout_f['yaxis'].update(title="Écart-type de la charge nette (€)", tickformat=',.0f', exponentformat='none')
-    fig.update_layout(layout_f)
+    _add_scatter(df_cible, "Dans la cible" if has_target else "Programmes",
+                 PALETTE['success'] if has_target else PALETTE['accent2'])
+    _add_scatter(df_hors, "Hors cible", PALETTE['text_muted'], size=9)
 
-    # ── Tableau commun ──
-    def creer_table(df):
-        if df.empty:
-            return html.Div("Aucun programme.", style={'color': PALETTE['text_muted']})
-        rows = df.copy()
-        brut_vals = {}
-        if 'id' in rows.columns and (rows['id'] == 'brut').any():
-            for col in ['esp', 'std', 'var95', 'var99', 'tvar99']:
-                if col in rows.columns:
-                    brut_vals[col] = rows.loc[rows['id'] == 'brut', col].values[0]
+    lf = plotly_layout("Frontière Efficace — Espérance vs Écart-type", height=500)
+    lf['xaxis'].update(title="Espérance charge nette (€)", tickformat=',.0f', exponentformat='none')
+    lf['yaxis'].update(title="Écart-type σ (€)", tickformat=',.0f', exponentformat='none')
+    fig_f.update_layout(lf)
 
-        def fmt_cell(val, ref, is_brut):
-            if pd.isna(val):
-                return 'N/A'
-            base = _fmt_eur(val)
-            if is_brut or not ref or ref == 0:
-                return base
-            pct = (val - ref) / ref * 100
-            arrow = "▼" if pct < 0 else "▲"
-            return f"{base}  {arrow}{abs(pct):.1f}%"
+    # ──────────────────────────────────────────────────────────
+    # INDICATEURS — % réduction vs Brut (graphique horizontal)
+    # ──────────────────────────────────────────────────────────
+    fig_m = go.Figure()
 
-        display = rows.copy()
-        for col in ['esp', 'std', 'var95', 'var99', 'tvar99']:
-            if col in display.columns:
-                ref = brut_vals.get(col)
-                display[col] = display.apply(
-                    lambda r, c=col, rv=ref: fmt_cell(r[c], rv, r['id'] == 'brut'), axis=1
-                )
-        if 'burning_cost' in display.columns:
-            display['burning_cost'] = display.apply(
-                lambda r: '—' if r['id'] == 'brut' else f"{r['burning_cost']*100:.1f}%",
-                axis=1,
-            )
+    if brut.empty or others.empty:
+        fig_m.update_layout(plotly_layout("Ajoutez des programmes pour comparer"))
+    else:
+        # Trier les programmes par % réduction VaR99 (meilleur en haut)
+        oth = others.copy()
+        oth['red_var99'] = oth['var99'].apply(lambda v: _pct_reduction(v, brut_var99))
+        oth = oth.sort_values('red_var99', ascending=True)  # ascending = bottom to top in horizontal bars
 
-        cols = [
-            {'name': 'Programme',    'id': 'name'},
-            {'name': 'Structure',    'id': 'desc'},
-            {'name': 'Espérance',    'id': 'esp'},
-            {'name': 'Écart-type',  'id': 'std'},
-            {'name': 'VaR 95% (1/20 ans)', 'id': 'var95'},
-            {'name': 'VaR 99% (1/100 ans)', 'id': 'var99'},
-            {'name': 'TVaR 99%',    'id': 'tvar99'},
-            {'name': 'Burning Cost', 'id': 'burning_cost'},
+        metrics_def = [
+            ('esp',    'Réduction ESP',      PALETTE['accent2']),
+            ('var95',  'Réduction VaR 95%',  PALETTE['warning']),
+            ('var99',  'Réduction VaR 99%',  PALETTE['danger']),
+            ('tvar99', 'Réduction TVaR 99%', '#E8544A'),
         ]
-        cols = [c for c in cols if c['id'] in display.columns]
-        return make_table(display.to_dict('records'), cols, highlight_first=True)
 
-    table_all = creer_table(df_p)
-    table_filtered = creer_table(df_cible) if has_target and not df_cible.empty else (
-        html.Div("Définissez un écart-type Min/Max (colonne gauche) pour filtrer.",
-                 style={'color': PALETTE['text_muted'], 'fontSize': '13px'})
-        if not has_target else
-        html.Div("Aucun programme dans la zone cible.", style={'color': PALETTE['text_muted']})
-    )
-
-    # ── Graphique indicateurs (grouped bar) ──
-    metrics_fig = go.Figure()
-    metric_cols   = ['esp',             'var95',              'var99',            'tvar99']
-    metric_labels = ['Espérance (ESP)', 'VaR 95% (1/20 ans)', 'VaR 99% (1/100 ans)', 'TVaR 99%']
-    metric_colors = [PALETTE['accent2'], PALETTE['warning'],   PALETTE['danger'],    '#C0392B']
-
-    for col, label, color in zip(metric_cols, metric_labels, metric_colors):
-        if col in df_p.columns:
-            metrics_fig.add_trace(go.Bar(
-                name=label, x=df_p['name'], y=df_p[col],
-                marker_color=color, opacity=0.85,
-                text=df_p[col].apply(lambda v: _fmt_eur(v) if pd.notna(v) else ''),
+        for col, label, color in metrics_def:
+            ref = locals().get(f'brut_{col}', None)
+            if ref is None:
+                if col == 'var95':  ref = brut_var95
+                elif col == 'tvar99': ref = brut_tvar
+                else: ref = brut_var99
+            if ref is None or ref == 0:
+                continue
+            pcts = [_pct_reduction(v, ref) for v in oth[col]]
+            texts = [f"{p:+.1f}%" for p in pcts]
+            bar_colors = [
+                (PALETTE['success'] if p > 0 else PALETTE['danger'])
+                for p in pcts
+            ]
+            fig_m.add_trace(go.Bar(
+                name=label,
+                x=pcts,
+                y=oth['name'],
+                orientation='h',
+                marker_color=color,
+                opacity=0.82,
+                text=texts,
                 textposition='outside',
-                textfont=dict(size=10, color=PALETTE['text']),
+                textfont=dict(size=11, color=PALETTE['text']),
+                hovertemplate=(
+                    f"<b>%{{y}}</b> — {label}<br>"
+                    "Réduction vs Brut : %{x:+.1f}%<br>"
+                    "<extra></extra>"
+                ),
+                width=0.6,
             ))
 
-    m_layout = plotly_layout("Comparaison des indicateurs de risque par programme", height=400)
-    m_layout['xaxis']['title'] = "Programme"
-    m_layout['yaxis'].update(title="Montant (€)", tickformat=',.0f', exponentformat='none')
-    m_layout['barmode'] = 'group'
-    m_layout['uniformtext'] = dict(mode='hide', minsize=9)
-    metrics_fig.update_layout(m_layout)
+        # Ligne zéro = Brut reference
+        fig_m.add_vline(x=0, line_width=2, line_color=PALETTE['danger'], opacity=0.6,
+                        annotation_text="BRUT", annotation_font=dict(color=PALETTE['danger'], size=10),
+                        annotation_position="bottom right")
 
-    return fig, metrics_fig, table_all, table_filtered
+        n_prog = len(oth)
+        chart_height = max(300, 120 + n_prog * 60)
+        lm = plotly_layout("Réduction des indicateurs de risque vs position BRUT", height=chart_height)
+        lm['xaxis'].update(
+            title="Réduction (%) — valeur positive = meilleure protection",
+            ticksuffix="%",
+            zeroline=True,
+            zerolinecolor=PALETTE['danger'],
+            zerolinewidth=1.5,
+        )
+        lm['yaxis'].update(title="", tickfont=dict(size=12, color=PALETTE['text']))
+        lm['barmode'] = 'group'
+        lm['legend'].update(orientation='h', yanchor='bottom', y=1.02, xanchor='left', x=0)
+        lm['margin'].update(l=140, r=80, t=80, b=60)
+        fig_m.update_layout(lm)
+
+    # ──────────────────────────────────────────────────────────
+    # TABLEAU COMPARATIF
+    # ──────────────────────────────────────────────────────────
+    def _make_table(df):
+        if df.empty:
+            return html.Div("Aucun programme.", style={'color': PALETTE['text_muted'], 'padding': '12px'})
+
+        rows = []
+        for _, row in df.iterrows():
+            is_brut = row['id'] == 'brut'
+
+            def _cell(col, ref_val):
+                v = row.get(col, None)
+                if v is None or (isinstance(v, float) and np.isnan(v)):
+                    return 'N/A'
+                base = _fmt_eur(v)
+                if is_brut or ref_val is None or ref_val == 0:
+                    return base
+                pct = _pct_reduction(v, ref_val)
+                arrow = "▼" if pct > 0 else "▲"
+                return f"{base}  {arrow}{abs(pct):.1f}%"
+
+            bc = row.get('burning_cost', None)
+            rows.append({
+                'name':  row['name'],
+                'desc':  row.get('desc', '—'),
+                'esp':   _cell('esp',    brut_esp),
+                'std':   _cell('std',    brut_std),
+                'var95': _cell('var95',  brut_var95),
+                'var99': _cell('var99',  brut_var99),
+                'tvar':  _cell('tvar99', brut_tvar),
+                'bc':    '—' if is_brut else f"{bc*100:.1f}%" if bc is not None else '—',
+            })
+
+        cond = [
+            {'if': {'row_index': 'odd'}, 'backgroundColor': PALETTE['surface2']},
+            {'if': {'row_index': 0},
+             'backgroundColor': '#1A0A0A',
+             'color': PALETTE['danger'],
+             'fontWeight': '700'},
+        ]
+        # Color code % change cells
+        for col_id in ['esp', 'std', 'var95', 'var99', 'tvar']:
+            cond += [
+                {'if': {'filter_query': f'{{{col_id}}} contains "▼"', 'column_id': col_id},
+                 'color': PALETTE['success']},
+                {'if': {'filter_query': f'{{{col_id}}} contains "▲"', 'column_id': col_id},
+                 'color': PALETTE['danger']},
+            ]
+
+        return dash_table.DataTable(
+            data=rows,
+            columns=[
+                {'name': 'Programme',        'id': 'name'},
+                {'name': 'Structure',         'id': 'desc'},
+                {'name': 'ESP',               'id': 'esp'},
+                {'name': 'σ',                 'id': 'std'},
+                {'name': 'VaR 95% (1/20 ans)','id': 'var95'},
+                {'name': 'VaR 99% (1/100 ans)','id': 'var99'},
+                {'name': 'TVaR 99%',          'id': 'tvar'},
+                {'name': 'Burning Cost',      'id': 'bc'},
+            ],
+            style_table={'overflowX': 'auto', 'borderRadius': '8px', 'border': f"1px solid {PALETTE['border']}"},
+            style_cell={
+                'textAlign': 'center', 'padding': '10px 14px', 'fontSize': '12px',
+                'backgroundColor': PALETTE['surface'], 'color': PALETTE['text'],
+                'border': f"1px solid {PALETTE['border']}",
+                'fontFamily': "'JetBrains Mono', monospace",
+                'whiteSpace': 'normal', 'minWidth': '90px',
+            },
+            style_cell_conditional=[
+                {'if': {'column_id': 'name'}, 'textAlign': 'left', 'fontWeight': '600', 'color': PALETTE['text'], 'minWidth': '110px'},
+                {'if': {'column_id': 'desc'}, 'textAlign': 'left', 'fontSize': '11px', 'color': PALETTE['text_muted'], 'minWidth': '150px'},
+            ],
+            style_header={
+                'backgroundColor': PALETTE['surface2'], 'color': PALETTE['accent'],
+                'fontWeight': '700', 'fontSize': '11px', 'letterSpacing': '0.8px',
+                'textTransform': 'uppercase', 'border': f"1px solid {PALETTE['border']}",
+            },
+            style_data_conditional=cond,
+        )
+
+    table_all = _make_table(df_p)
+    if has_target:
+        table_filtered = _make_table(df_cible) if not df_cible.empty else html.Div(
+            "Aucun programme dans la zone cible.", style={'color': PALETTE['text_muted'], 'padding': '12px'})
+    else:
+        table_filtered = html.Div(
+            "Définissez un Écart-type Min/Max dans la colonne gauche pour filtrer.",
+            style={'color': PALETTE['text_muted'], 'fontSize': '13px', 'padding': '12px'},
+        )
+
+    return fig_f, fig_m, table_all, table_filtered
 
 
-# ── OEP ──────────────────────────────────────────────────────────────────────
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# OEP — courbes d'excédance + tableau de référence
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @app.callback(
-    Output('r-oep-graph', 'figure'),
+    [Output('r-oep-graph', 'figure'),
+     Output('r-oep-ref-table', 'children')],
     [Input('r-saved-programs-store', 'data'),
      Input('r-simulations-store', 'data')]
 )
 def r_render_oep(progs, sims):
-    fig = go.Figure()
-    layout = plotly_layout("Courbe d'Excédance de Pertes (OEP)", height=480)
-    layout['xaxis'].update(title="Période de retour (années)", type='log',
-                           tickvals=[1, 2, 5, 10, 20, 50, 100, 200, 500, 1000],
-                           ticktext=['1', '2', '5', '10', '20', '50', '100', '200', '500', '1000'])
-    layout['yaxis'].update(title="Perte annuelle dépassée (€)", tickformat=',.0f', exponentformat='none')
+    _empty = go.Figure()
+    _empty.update_layout(plotly_layout("Générez les simulations et ajoutez des programmes"))
 
     if not progs or not sims:
-        fig.update_layout(layout)
-        return fig
+        return _empty, html.Div()
 
-    colors = [PALETTE['danger'], PALETTE['accent2'], PALETTE['success'], PALETTE['warning'],
-              PALETTE['accent'], '#9B59B6', '#E67E22', '#1ABC9C', '#3498DB']
+    n_sims = len(sims)
+    fig = go.Figure()
+
+    # Palette distincte pour les courbes
+    prog_colors = [
+        PALETTE['danger'],   # BRUT — rouge
+        PALETTE['success'],
+        PALETTE['accent2'],
+        PALETTE['warning'],
+        '#A78BFA',
+        '#F472B6',
+        '#34D399',
+        '#60A5FA',
+    ]
+
+    ref_rows = []  # Pour le tableau de valeurs aux points de référence
 
     for i, prog in enumerate(progs):
         stack = prog.get('stack', [])
         try:
-            from backend.reinsurance import compute_charges
             ch = compute_charges(sims, stack)
         except Exception:
             continue
-        rp, sorted_ch = compute_oep_curve(ch)
-        color = PALETTE['danger'] if prog['id'] == 'brut' else colors[i % len(colors)]
+
+        n = len(ch)
+        sorted_ch = np.sort(ch)[::-1]
+        ranks = np.arange(1, n + 1)
+        rp = n / ranks
+
+        color = prog_colors[0] if prog['id'] == 'brut' else prog_colors[min(i, len(prog_colors) - 1)]
         dash_style = 'dash' if prog['id'] == 'brut' else 'solid'
-        width = 2.5 if prog['id'] == 'brut' else 1.8
+        width = 2.8 if prog['id'] == 'brut' else 2.0
+
+        # Calculer les valeurs aux périodes de référence
+        val_20  = float(sorted_ch[max(0, min(n - 1, int(n / 20) - 1))])
+        val_100 = float(sorted_ch[max(0, min(n - 1, int(n / 100) - 1))])
+
+        ref_rows.append({
+            'name':   prog['name'],
+            'v20':    _fmt_eur(val_20),
+            'v100':   _fmt_eur(val_100),
+            'color':  color,
+        })
 
         fig.add_trace(go.Scatter(
-            x=rp, y=sorted_ch,
+            x=rp,
+            y=sorted_ch,
             name=prog['name'],
             mode='lines',
             line=dict(color=color, width=width, dash=dash_style),
             hovertemplate=(
                 f"<b>{prog['name']}</b><br>"
-                "Période de retour: %{x:.0f} ans<br>"
-                "Perte: %{y:,.0f} €<extra></extra>"
+                "Période de retour : %{x:.0f} ans<br>"
+                "Perte dépassée : %{y:,.0f} €"
+                "<extra></extra>"
             ),
         ))
 
-    # Lignes de référence pour les périodes classiques
-    for rp_val, label, color in [(20, '1/20 ans (VaR 95%)', PALETTE['warning']),
-                                  (100, '1/100 ans (VaR 99%)', PALETTE['danger'])]:
-        fig.add_vline(x=rp_val, line_dash='dot', line_color=color, opacity=0.5,
-                      annotation_text=label, annotation_font=dict(color=color, size=10),
-                      annotation_position='top right')
+        # Points de repère aux périodes de référence
+        for rp_val, val in [(20, val_20), (100, val_100)]:
+            if rp_val <= n:
+                fig.add_trace(go.Scatter(
+                    x=[rp_val], y=[val],
+                    mode='markers',
+                    marker=dict(size=7, color=color, symbol='circle',
+                                line=dict(width=1.5, color=PALETTE['surface'])),
+                    showlegend=False,
+                    hovertemplate=(
+                        f"<b>{prog['name']}</b><br>"
+                        f"1/{rp_val} ans : {_fmt_eur(val)}"
+                        "<extra></extra>"
+                    ),
+                ))
 
-    fig.update_layout(layout)
-    return fig
+    # Lignes de référence
+    for rp_val, label, c in [
+        (20,  "← 1/20 ans (VaR 95%)",  PALETTE['warning']),
+        (100, "← 1/100 ans (VaR 99%)", PALETTE['danger']),
+    ]:
+        if rp_val <= n_sims:
+            fig.add_vline(
+                x=rp_val,
+                line_dash='dot', line_color=c, opacity=0.7, line_width=1.5,
+                annotation_text=label,
+                annotation_font=dict(color=c, size=10),
+                annotation_position="top left",
+            )
+
+    lo = plotly_layout("Courbe d'Excédance de Pertes (OEP)", height=480)
+    lo['xaxis'].update(
+        title="Période de retour (années)",
+        type='log',
+        tickvals=[1, 2, 5, 10, 20, 50, 100, 200, 500],
+        ticktext=['1', '2', '5', '10', '20', '50', '100', '200', '500'],
+        dtick=None,
+    )
+    lo['yaxis'].update(title="Perte annuelle (€)", tickformat=',.0f', exponentformat='none')
+    lo['legend'].update(orientation='v', x=1.01, y=1, xanchor='left')
+    lo['margin'].update(r=160)
+    fig.update_layout(lo)
+
+    # ── Tableau de valeurs aux périodes de référence ──
+    if not ref_rows:
+        ref_table = html.Div()
+    else:
+        ref_table = html.Div([
+            html.Div("Valeurs aux points de référence", style={
+                'fontSize': '11px', 'fontWeight': '700', 'letterSpacing': '1px',
+                'textTransform': 'uppercase', 'color': PALETTE['text_muted'],
+                'marginBottom': '10px',
+            }),
+            html.Div([
+                html.Div([
+                    html.Div([
+                        html.Div(style={
+                            'width': '10px', 'height': '10px', 'borderRadius': '50%',
+                            'backgroundColor': r['color'], 'marginRight': '8px', 'flexShrink': '0',
+                        }),
+                        html.Span(r['name'], style={'flex': '1', 'fontSize': '12px', 'fontWeight': '600'}),
+                        html.Span(f"1/20 ans : {r['v20']}", style={
+                            'fontSize': '12px', 'color': PALETTE['warning'],
+                            'fontFamily': "'JetBrains Mono', monospace",
+                            'marginRight': '20px',
+                        }),
+                        html.Span(f"1/100 ans : {r['v100']}", style={
+                            'fontSize': '12px', 'color': PALETTE['danger'],
+                            'fontFamily': "'JetBrains Mono', monospace",
+                        }),
+                    ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '8px'}),
+                ])
+                for r in ref_rows
+            ]),
+        ], style={
+            'backgroundColor': PALETTE['surface2'],
+            'border': f"1px solid {PALETTE['border']}",
+            'borderRadius': '8px',
+            'padding': '14px 18px',
+        })
+
+    return fig, ref_table
 
 
-# ── Retenu / Cédé ────────────────────────────────────────────────────────────
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# RETENU / CÉDÉ — box plots + KPI strip
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @app.callback(
-    Output('r-retained-ceded-graph', 'figure'),
+    [Output('r-retained-ceded-graph', 'figure'),
+     Output('r-retained-kpis', 'children')],
     [Input('r-detail-prog-dropdown', 'value'),
      Input('r-saved-programs-store', 'data')],
     State('r-simulations-store', 'data')
 )
 def r_render_retained_ceded(prog_id, progs, sims):
-    fig = go.Figure()
-    layout = plotly_layout("Distribution Retenu / Cédé", height=420)
-    layout['xaxis'].update(title="Charge annuelle (€)", tickformat=',.0f', exponentformat='none')
-    layout['yaxis'].update(title="Nombre de simulations")
-    layout['barmode'] = 'overlay'
+    empty_fig = go.Figure()
+    empty_fig.update_layout(plotly_layout("Sélectionnez un programme", height=380))
 
     if not prog_id or not progs or not sims:
-        fig.update_layout(layout)
-        return fig
+        return empty_fig, html.Div()
 
     prog = next((p for p in progs if p['id'] == prog_id), None)
     if not prog:
-        fig.update_layout(layout)
-        return fig
+        return empty_fig, html.Div()
 
     stack = prog.get('stack', [])
     try:
         gross_arr, net_arr = compute_ceded_charges(sims, stack)
     except Exception:
-        fig.update_layout(layout)
-        return fig
+        return empty_fig, html.Div()
 
-    ceded_arr = gross_arr - net_arr
+    ceded_arr  = gross_arr - net_arr
+    n = len(net_arr)
 
-    fig.add_trace(go.Histogram(
-        x=gross_arr, name="Brut total",
-        marker_color=PALETTE['text_muted'], opacity=0.35,
-        nbinsx=60,
-        hovertemplate="Brut: %{x:,.0f} €<br>Simulations: %{y}<extra></extra>",
+    # ── KPI strip ──
+    mean_gross  = float(np.mean(gross_arr))
+    mean_net    = float(np.mean(net_arr))
+    mean_ceded  = float(np.mean(ceded_arr))
+    p99_net     = float(np.percentile(net_arr, 99))
+    p99_ceded   = float(np.percentile(ceded_arr, 99))
+    bc_pct      = mean_ceded / mean_gross * 100 if mean_gross > 0 else 0.0
+
+    kpis = html.Div([
+        _kpi_card("ESP Retenu",       _fmt_eur(mean_net),   f"Charge moyenne annuelle cédante",  PALETTE['success'], PALETTE['success']),
+        _kpi_card("ESP Cédé",         _fmt_eur(mean_ceded), f"Charge moyenne annuelle réassureur", PALETTE['warning'], PALETTE['warning']),
+        _kpi_card("Burning Cost",     f"{bc_pct:.1f}%",     "Part du brut cédée en moyenne",     PALETTE['accent2'], PALETTE['accent2']),
+        _kpi_card("VaR 99% Retenu",   _fmt_eur(p99_net),    "Scénario 1 an sur 100 — cédante",   PALETTE['danger'],  PALETTE['danger']),
+        _kpi_card("VaR 99% Cédé",     _fmt_eur(p99_ceded),  "Scénario 1 an sur 100 — réassureur", PALETTE['warning'], PALETTE['warning']),
+    ], style={'display': 'flex', 'gap': '10px'})
+
+    # ── Box plots — Brut / Retenu / Cédé ──
+    fig = go.Figure()
+
+    fig.add_trace(go.Box(
+        y=gross_arr,
+        name="Brut",
+        marker_color=PALETTE['text_muted'],
+        line=dict(color=PALETTE['text_muted'], width=1.5),
+        fillcolor=f"{PALETTE['text_muted']}22",
+        boxpoints='outliers',
+        jitter=0.3,
+        marker=dict(size=3, opacity=0.4),
+        hovertemplate="Brut<br>%{y:,.0f} €<extra></extra>",
     ))
-    fig.add_trace(go.Histogram(
-        x=net_arr, name="Retenu (cédante)",
-        marker_color=PALETTE['success'], opacity=0.75,
-        nbinsx=60,
-        hovertemplate="Retenu: %{x:,.0f} €<br>Simulations: %{y}<extra></extra>",
+    fig.add_trace(go.Box(
+        y=net_arr,
+        name="Retenu (cédante)",
+        marker_color=PALETTE['success'],
+        line=dict(color=PALETTE['success'], width=2),
+        fillcolor=f"{PALETTE['success']}22",
+        boxpoints='outliers',
+        jitter=0.3,
+        marker=dict(size=3, opacity=0.5),
+        hovertemplate="Retenu<br>%{y:,.0f} €<extra></extra>",
     ))
-    fig.add_trace(go.Histogram(
-        x=ceded_arr, name="Cédé (réassureur)",
-        marker_color=PALETTE['warning'], opacity=0.75,
-        nbinsx=60,
-        hovertemplate="Cédé: %{x:,.0f} €<br>Simulations: %{y}<extra></extra>",
+    fig.add_trace(go.Box(
+        y=ceded_arr,
+        name="Cédé (réassureur)",
+        marker_color=PALETTE['warning'],
+        line=dict(color=PALETTE['warning'], width=2),
+        fillcolor=f"{PALETTE['warning']}22",
+        boxpoints='outliers',
+        jitter=0.3,
+        marker=dict(size=3, opacity=0.5),
+        hovertemplate="Cédé<br>%{y:,.0f} €<extra></extra>",
     ))
 
-    # Médianes
-    for arr, name, color in [
-        (net_arr,   "Médiane retenu",  PALETTE['success']),
-        (ceded_arr, "Médiane cédé",    PALETTE['warning']),
-    ]:
-        median_val = float(np.median(arr))
-        fig.add_vline(x=median_val, line_dash='dot', line_color=color, opacity=0.8,
-                      annotation_text=f"{name}: {_fmt_eur(median_val)}",
-                      annotation_font=dict(color=color, size=10),
-                      annotation_position='top left')
+    title = f"Distribution Retenu / Cédé — {prog['name']}"
+    lo = plotly_layout(title, height=420)
+    lo['yaxis'].update(title="Charge annuelle (€)", tickformat=',.0f', exponentformat='none')
+    lo['xaxis'].update(title="")
+    lo['boxmode'] = 'group'
+    lo['showlegend'] = True
+    lo['annotations'] = [dict(
+        x=0.5, y=1.05, xref='paper', yref='paper',
+        text=f"Boîte = Q1–Q3  ·  Trait central = médiane  ·  {n:,} simulations",
+        showarrow=False,
+        font=dict(size=10, color=PALETTE['text_muted']),
+        align='center',
+    )]
+    fig.update_layout(lo)
+    return fig, kpis
 
-    title = f"Retenu vs Cédé — {prog['name']}"
-    layout['title']['text'] = f"<b>{title}</b>"
-    fig.update_layout(layout)
-    return fig
 
-
-# ── Heatmap sensibilité XS ────────────────────────────────────────────────────
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# HEATMAP SENSIBILITÉ XS
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @app.callback(
     [Output('r-heatmap-graph', 'figure'),
@@ -568,68 +948,90 @@ def r_render_retained_ceded(prog_id, progs, sims):
     prevent_initial_call=True
 )
 def r_render_heatmap(n_clicks, prio_min, prio_max, portee_min, portee_max, steps, sims):
-    fig = go.Figure()
-    layout = plotly_layout("Heatmap ESP net — Priorité × Portée", height=480)
+    empty_fig = go.Figure()
+    empty_fig.update_layout(plotly_layout("Configurez les paramètres et cliquez Calculer"))
 
     if not sims:
-        layout['title']['text'] = "<b>Générez d'abord les simulations</b>"
-        fig.update_layout(layout)
-        return fig, "⚠ Aucune simulation disponible."
+        return empty_fig, "⚠  Générez d'abord les simulations."
 
     try:
-        prio_min = float(prio_min or 50_000)
-        prio_max = float(prio_max or 500_000)
+        prio_min   = float(prio_min   or 50_000)
+        prio_max   = float(prio_max   or 500_000)
         portee_min = float(portee_min or 100_000)
         portee_max = float(portee_max or 1_000_000)
-        steps = max(4, min(20, int(steps or 8)))
+        steps      = max(4, min(20, int(steps or 8)))
     except (TypeError, ValueError):
-        fig.update_layout(layout)
-        return fig, "⚠ Paramètres invalides."
+        return empty_fig, "⚠  Paramètres invalides."
 
-    prio_list   = np.linspace(prio_min, prio_max, steps)
+    prio_list   = np.linspace(prio_min,   prio_max,   steps)
     portee_list = np.linspace(portee_min, portee_max, steps)
+    matrix      = compute_heatmap(sims, prio_list, portee_list)
 
-    matrix = compute_heatmap(sims, prio_list, portee_list)
-
-    # Labels formatés
     x_labels = [_fmt_eur(v) for v in prio_list]
     y_labels = [_fmt_eur(v) for v in portee_list]
 
-    # Texte dans chaque cellule
-    text_matrix = [[_fmt_eur(matrix[i, j]) for j in range(len(prio_list))]
-                   for i in range(len(portee_list))]
+    # Trouver le minimum
+    min_idx = np.unravel_index(np.argmin(matrix), matrix.shape)
 
-    fig.add_trace(go.Heatmap(
+    text_matrix = [
+        [_fmt_eur(matrix[i, j]) for j in range(len(prio_list))]
+        for i in range(len(portee_list))
+    ]
+
+    fig = go.Figure(go.Heatmap(
         z=matrix,
         x=x_labels,
         y=y_labels,
         text=text_matrix,
         texttemplate="%{text}",
-        textfont=dict(size=9, color='white'),
+        textfont=dict(size=9, color='white', family="'JetBrains Mono', monospace"),
         colorscale=[
-            [0.0, '#0D4F3C'],
-            [0.3, PALETTE['success']],
-            [0.6, PALETTE['warning']],
-            [1.0, PALETTE['danger']],
+            [0.0,  '#0D4A38'],
+            [0.25, PALETTE['success']],
+            [0.55, PALETTE['warning']],
+            [1.0,  PALETTE['danger']],
         ],
-        reversescale=False,
         colorbar=dict(
-            title="ESP net (€)",
+            title=dict(text="ESP net (€)", font=dict(color=PALETTE['text'], size=11)),
             tickformat=',.0f',
-            title_font=dict(color=PALETTE['text'], size=11),
             tickfont=dict(color=PALETTE['text_muted'], size=10),
+            outlinewidth=0,
         ),
         hovertemplate=(
-            "Priorité: %{x}<br>"
-            "Portée: %{y}<br>"
-            "ESP net: %{text}<extra></extra>"
+            "Priorité : %{x}<br>"
+            "Portée : %{y}<br>"
+            "ESP net retenu : %{text}<extra></extra>"
         ),
     ))
 
-    layout['xaxis'].update(title="Priorité XS", tickangle=-30)
-    layout['yaxis'].update(title="Portée XS")
-    layout['margin'].update(l=90, b=100)
-    fig.update_layout(layout)
+    # Marquer le minimum
+    fig.add_trace(go.Scatter(
+        x=[x_labels[min_idx[1]]],
+        y=[y_labels[min_idx[0]]],
+        mode='markers+text',
+        text=["OPTIMUM"],
+        textposition="top center",
+        marker=dict(size=14, color='white', symbol='star',
+                    line=dict(width=1.5, color=PALETTE['success'])),
+        textfont=dict(color='white', size=9, family="'JetBrains Mono', monospace"),
+        showlegend=False,
+        hovertemplate=(
+            f"<b>Optimum</b><br>"
+            f"ESP net : {_fmt_eur(matrix[min_idx])}"
+            "<extra></extra>"
+        ),
+    ))
 
-    status = f"✓ Grille {steps}×{steps} calculée — {steps*steps} combinaisons testées"
+    lo = plotly_layout(f"Heatmap Sensibilité XS — ESP net retenu ({steps}×{steps} combinaisons)", height=500)
+    lo['xaxis'].update(title="Priorité XS", tickangle=-30, tickfont=dict(size=10))
+    lo['yaxis'].update(title="Portée XS", tickfont=dict(size=10))
+    lo['margin'].update(l=110, r=100, b=110, t=70)
+    fig.update_layout(lo)
+
+    best_prio   = prio_list[min_idx[1]]
+    best_portee = portee_list[min_idx[0]]
+    status = (
+        f"✓  Grille {steps}×{steps} calculée  ·  "
+        f"Optimum : {_fmt_eur(best_portee)} xs {_fmt_eur(best_prio)}  →  ESP {_fmt_eur(matrix[min_idx])}"
+    )
     return fig, status
