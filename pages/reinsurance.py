@@ -214,9 +214,9 @@ PAGE_REASSURANCE = html.Div([
                 },
                 children=[
 
-                    # TAB 1 — Indicateurs (anciennement Tab 2, now 1st = most important)
+                    # TAB 1 — Indicateurs
                     dcc.Tab(
-                        label='📊  Indicateurs',
+                        label='Indicateurs',
                         value='r-tab-metrics',
                         style=_tab_style,
                         selected_style={**_tab_selected_style,
@@ -243,7 +243,7 @@ PAGE_REASSURANCE = html.Div([
 
                     # TAB 2 — Frontière efficace
                     dcc.Tab(
-                        label='◎  Frontière',
+                        label='Frontière efficace',
                         value='r-tab-frontier',
                         style=_tab_style,
                         selected_style={**_tab_selected_style,
@@ -270,7 +270,7 @@ PAGE_REASSURANCE = html.Div([
 
                     # TAB 3 — OEP
                     dcc.Tab(
-                        label='📉  Courbe OEP',
+                        label='Courbe OEP',
                         value='r-tab-oep',
                         style=_tab_style,
                         selected_style={**_tab_selected_style,
@@ -300,7 +300,7 @@ PAGE_REASSURANCE = html.Div([
 
                     # TAB 4 — Retenu / Cédé
                     dcc.Tab(
-                        label='⚖  Retenu / Cédé',
+                        label='Retenu / Cédé',
                         value='r-tab-retained',
                         style=_tab_style,
                         selected_style={**_tab_selected_style,
@@ -327,7 +327,7 @@ PAGE_REASSURANCE = html.Div([
 
                     # TAB 5 — Sensibilité XS
                     dcc.Tab(
-                        label='🔥  Sensibilité XS',
+                        label='Sensibilité XS',
                         value='r-tab-heatmap',
                         style=_tab_style,
                         selected_style={**_tab_selected_style,
@@ -374,7 +374,7 @@ PAGE_REASSURANCE = html.Div([
                                     ], style={'flex': '0 0 100px'}),
                                 ], style={'display': 'flex', 'gap': '10px', 'marginBottom': '14px'}),
 
-                                btn_primary("🔥  Calculer la Heatmap", id='r-btn-heatmap'),
+                                btn_primary("Calculer la Heatmap", id='r-btn-heatmap'),
                                 html.Div(id='r-heatmap-status', style={
                                     'color': PALETTE['success'], 'fontSize': '11px',
                                     'marginTop': '8px', 'textAlign': 'center',
@@ -389,7 +389,7 @@ PAGE_REASSURANCE = html.Div([
 
                     # TAB 6 — Tous les programmes (tableau)
                     dcc.Tab(
-                        label='📋  Programmes',
+                        label='Programmes',
                         value='r-tab-all',
                         style=_tab_style,
                         selected_style=_tab_selected_style,
@@ -410,7 +410,7 @@ PAGE_REASSURANCE = html.Div([
 
                     # TAB 7 — Zone cible
                     dcc.Tab(
-                        label='🎯  Zone cible',
+                        label='Zone cible',
                         value='r-tab-filtered',
                         style=_tab_style,
                         selected_style={**_tab_selected_style,

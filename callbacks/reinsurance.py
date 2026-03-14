@@ -18,6 +18,13 @@ from components.ui import plotly_layout
 # HELPERS
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
+def _hex_rgba(hex_color, alpha=0.13):
+    """Convert #RRGGBB to rgba(r,g,b,alpha) — Plotly does not accept 8-digit hex."""
+    h = hex_color.lstrip('#')
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
 def _best_dist(fits_dict):
     if not fits_dict:
         return None
@@ -885,7 +892,7 @@ def r_render_retained_ceded(prog_id, progs, sims):
         name="Brut",
         marker_color=PALETTE['text_muted'],
         line=dict(color=PALETTE['text_muted'], width=1.5),
-        fillcolor=f"{PALETTE['text_muted']}22",
+        fillcolor=_hex_rgba(PALETTE['text_muted'], 0.12),
         boxpoints='outliers',
         jitter=0.3,
         marker=dict(size=3, opacity=0.4),
@@ -896,7 +903,7 @@ def r_render_retained_ceded(prog_id, progs, sims):
         name="Retenu (cédante)",
         marker_color=PALETTE['success'],
         line=dict(color=PALETTE['success'], width=2),
-        fillcolor=f"{PALETTE['success']}22",
+        fillcolor=_hex_rgba(PALETTE['success'], 0.15),
         boxpoints='outliers',
         jitter=0.3,
         marker=dict(size=3, opacity=0.5),
@@ -907,7 +914,7 @@ def r_render_retained_ceded(prog_id, progs, sims):
         name="Cédé (réassureur)",
         marker_color=PALETTE['warning'],
         line=dict(color=PALETTE['warning'], width=2),
-        fillcolor=f"{PALETTE['warning']}22",
+        fillcolor=_hex_rgba(PALETTE['warning'], 0.15),
         boxpoints='outliers',
         jitter=0.3,
         marker=dict(size=3, opacity=0.5),
