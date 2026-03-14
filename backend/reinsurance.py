@@ -134,6 +134,55 @@ def stats_programme(simulations, liste_traites):
     return esp, std, var95, var99, tvar99
 
 
+def compute_ceded_charges(simulations, liste_traites):
+    """
+    Retourne (gross_arr, net_arr) : charge brute et charge nette par simulation.
+    La différence gross - net = montant cédé.
+    """
+    gross_list, net_list = [], []
+    for annee in simulations:
+        if isinstance(annee, dict):
+            below = np.asarray(annee.get('below', []), dtype=float)
+            above = np.asarray(annee.get('above', []), dtype=float)
+        else:
+            below = np.asarray(annee, dtype=float)
+            above = np.array([], dtype=float)
+        gross_total = float(np.sum(below) + np.sum(above))
+        for traite in liste_traites:
+            below = _appliquer_traite_sinistres(below, traite)
+            above = _appliquer_traite_sinistres(above, traite)
+        net_total = float(np.sum(below) + np.sum(above))
+        gross_list.append(gross_total)
+        net_list.append(net_total)
+    return np.array(gross_list, dtype=float), np.array(net_list, dtype=float)
+
+
+def compute_oep_curve(charges):
+    """
+    Retourne (return_periods, sorted_charges) pour la courbe d'excédance de pertes.
+    Période de retour = n_simulations / rang (du plus grand au plus petit).
+    """
+    n = len(charges)
+    sorted_charges = np.sort(charges)[::-1]
+    ranks = np.arange(1, n + 1)
+    return_periods = n / ranks
+    return return_periods, sorted_charges
+
+
+def compute_heatmap(simulations, prio_list, portee_list):
+    """
+    Calcule la matrice des charges nettes moyennes pour une grille (priorité × portée).
+    Rows = portée, Cols = priorité.
+    """
+    matrix = np.zeros((len(portee_list), len(prio_list)))
+    for j, prio in enumerate(prio_list):
+        for i, portee in enumerate(portee_list):
+            traite = [{'type': 'XS', 'priorite': float(prio), 'portee': float(portee)}]
+            ch = compute_charges(simulations, traite)
+            matrix[i, j] = float(np.mean(ch))
+    return matrix
+
+
 def formater_description(stack):
     if not stack:
         return "Brut (sans réassurance)"
