@@ -1,402 +1,437 @@
 from dash import dcc, html
-from config import PALETTE
-from components.ui import card, section_title
+from config import PALETTE, SEV_DIST_NAMES, FREQ_DIST_NAMES
+from components.ui import card, section_title, btn_primary, btn_secondary
 
-_lbl = {
+_tab_style = {
     'color': PALETTE['text_muted'],
-    'fontSize': '11px',
-    'display': 'block',
-    'marginBottom': '4px',
-    'fontWeight': '600',
-    'letterSpacing': '0.5px',
-    'textTransform': 'uppercase',
+    'backgroundColor': PALETTE['surface2'],
+    'fontSize': '12px',
+    'padding': '9px 16px',
+    'fontWeight': '500',
+    'letterSpacing': '0.3px',
 }
+_tab_selected_style = {
+    'color': PALETTE['text'],
+    'backgroundColor': PALETTE['surface'],
+    'fontSize': '12px',
+    'padding': '9px 16px',
+    'fontWeight': '700',
+    'borderTop': f"2px solid {PALETTE['accent2']}",
+    'letterSpacing': '0.3px',
+}
+
 _inp = {
     'width': '100%',
-    'backgroundColor': '#1A2535',
+    'backgroundColor': PALETTE['surface2'],
     'border': f"1px solid {PALETTE['border']}",
     'color': PALETTE['text'],
     'borderRadius': '6px',
     'padding': '8px 12px',
     'fontFamily': "'JetBrains Mono', monospace",
     'fontSize': '13px',
-    'marginBottom': '10px',
 }
-_tab_style = {
+_lbl = {
     'color': PALETTE['text_muted'],
-    'backgroundColor': PALETTE['surface2'],
-    'fontSize': '13px',
-    'padding': '12px 24px',
+    'fontSize': '11px',
+    'display': 'block',
+    'marginBottom': '4px',
     'fontWeight': '500',
     'letterSpacing': '0.3px',
+    'textTransform': 'uppercase',
 }
-_tab_sel_s1 = {
-    'color': PALETTE['accent2'],
-    'backgroundColor': PALETTE['surface'],
-    'fontSize': '13px',
-    'padding': '12px 24px',
-    'fontWeight': '700',
-    'borderTop': f"2px solid {PALETTE['accent2']}",
-}
-_tab_sel_s2 = {
-    'color': PALETTE['success'],
-    'backgroundColor': PALETTE['surface'],
-    'fontSize': '13px',
-    'padding': '12px 24px',
-    'fontWeight': '700',
-    'borderTop': f"2px solid {PALETTE['success']}",
-}
-
-_info_box = {
-    'backgroundColor': '#101E30',
-    'border': f"1px solid {PALETTE['border']}",
-    'borderRadius': '8px',
-    'padding': '12px 16px',
-    'fontSize': '12px',
-    'color': PALETTE['text_muted'],
-    'lineHeight': '1.7',
-    'marginBottom': '16px',
-}
-
-_why_box_s1 = {
-    'backgroundColor': '#0D1E33',
-    'border': f"1px solid {PALETTE['accent2']}44",
-    'borderLeft': f"3px solid {PALETTE['accent2']}",
-    'borderRadius': '8px',
-    'padding': '14px 18px',
-    'fontSize': '13px',
-    'color': PALETTE['text'],
-    'lineHeight': '1.7',
-    'marginTop': '16px',
-}
-
-_why_box_s2 = {
-    'backgroundColor': '#0D2218',
-    'border': f"1px solid {PALETTE['success']}44",
-    'borderLeft': f"3px solid {PALETTE['success']}",
-    'borderRadius': '8px',
-    'padding': '14px 18px',
-    'fontSize': '13px',
-    'color': PALETTE['text'],
-    'lineHeight': '1.7',
-    'marginTop': '16px',
-}
-
-_slider_marks_theta = {0: '0%', 0.1: '10%', 0.2: '20%', 0.3: '30%', 0.5: '50%'}
-_slider_marks_er = {0.05: '5%', 0.1: '10%', 0.2: '20%', 0.35: '35%', 0.5: '50%'}
-_slider_marks_q = {0.05: '5%', 0.1: '10%', 0.2: '20%', 0.4: '40%', 0.6: '60%'}
-_slider_marks_av = {0: '0', 0.05: '0.05', 0.1: '0.1', 0.2: '0.2', 0.5: '0.5'}
-
-
-def _dist_params_block(prefix, accent):
-    """Distribution selection + conditional parameter inputs."""
-    return html.Div([
-        html.Label("Distribution de S", style=_lbl),
-        dcc.Dropdown(
-            id=f'{prefix}-dist',
-            options=[
-                {'label': 'Exponentielle', 'value': 'exponential'},
-                {'label': 'Lognormale', 'value': 'lognormal'},
-                {'label': 'Gamma', 'value': 'gamma'},
-            ],
-            value='lognormal',
-            clearable=False,
-            style={'marginBottom': '12px'},
-        ),
-
-        # Exponential params
-        html.Div(id=f'{prefix}-params-exp', style={'display': 'none'}, children=[
-            html.Label("Moyenne E[S]", style=_lbl),
-            dcc.Input(id=f'{prefix}-exp-mean', type='number', value=100000,
-                      min=1000, step=5000, style=_inp),
-        ]),
-
-        # Lognormal params
-        html.Div(id=f'{prefix}-params-ln', style={'display': 'block'}, children=[
-            html.Label("μ (log-moyenne)", style=_lbl),
-            dcc.Input(id=f'{prefix}-ln-mu', type='number', value=11.0,
-                      step=0.1, style=_inp),
-            html.Label("σ (log-écart-type)", style=_lbl),
-            dcc.Input(id=f'{prefix}-ln-sigma', type='number', value=0.8,
-                      min=0.01, max=3.0, step=0.05, style=_inp),
-        ]),
-
-        # Gamma params
-        html.Div(id=f'{prefix}-params-gam', style={'display': 'none'}, children=[
-            html.Label("Shape α", style=_lbl),
-            dcc.Input(id=f'{prefix}-gam-alpha', type='number', value=3.0,
-                      min=0.1, step=0.1, style=_inp),
-            html.Label("Scale β", style=_lbl),
-            dcc.Input(id=f'{prefix}-gam-beta', type='number', value=33000,
-                      min=100, step=1000, style=_inp),
-        ]),
-
-        # Implied moments display
-        html.Div(id=f'{prefix}-dist-info', style={
-            'backgroundColor': '#101E30',
-            'border': f"1px solid {PALETTE['border']}",
-            'borderRadius': '6px',
-            'padding': '8px 12px',
-            'fontSize': '11px',
-            'color': accent,
-            'fontFamily': "'JetBrains Mono', monospace",
-            'marginBottom': '16px',
-            'lineHeight': '1.6',
-        }),
-    ])
-
-
-def _params_panel_s1():
-    return html.Div([
-        # Context
-        html.Div([
-            html.Div("Scénario 1 — Prime valeur espérée", style={
-                'fontSize': '11px', 'fontWeight': '700', 'letterSpacing': '1px',
-                'textTransform': 'uppercase', 'color': PALETTE['accent2'],
-                'marginBottom': '6px',
-            }),
-            html.P(
-                "P_R = (1+θ)·E[R]. À E[R] fixé, le Stop-Loss minimise Var(D). "
-                "Objectif : choisir b tel que E[(S−b)₊] = E[R].",
-                style={'fontSize': '12px', 'color': PALETTE['text_muted'],
-                       'lineHeight': '1.6', 'margin': 0},
-            ),
-        ], style=_info_box),
-
-        section_title("Distribution de S", PALETTE['accent2']),
-        _dist_params_block('s1', PALETTE['accent2']),
-
-        html.Div(style={'height': '1px', 'backgroundColor': PALETTE['border'],
-                        'marginBottom': '16px'}),
-        section_title("Paramètres de prime", PALETTE['accent2']),
-
-        html.Label("Chargement θ", style=_lbl),
-        html.Div([
-            dcc.Slider(id='s1-theta', min=0, max=0.5, step=0.01, value=0.2,
-                       marks=_slider_marks_theta,
-                       tooltip={'placement': 'bottom', 'always_visible': False}),
-        ], style={'marginBottom': '24px', 'paddingBottom': '8px'}),
-
-        html.Label("Budget E[R] / E[S]", style=_lbl),
-        html.P("Part de la perte espérée cédée au réassureur.", style={
-            'fontSize': '11px', 'color': PALETTE['text_muted'],
-            'marginBottom': '8px', 'lineHeight': '1.4',
-        }),
-        html.Div([
-            dcc.Slider(id='s1-er-frac', min=0.02, max=0.5, step=0.01, value=0.2,
-                       marks=_slider_marks_er,
-                       tooltip={'placement': 'bottom', 'always_visible': False}),
-        ], style={'marginBottom': '20px', 'paddingBottom': '8px'}),
-
-    ], style={'width': '260px', 'flexShrink': '0'})
-
-
-def _params_panel_s2():
-    return html.Div([
-        # Context
-        html.Div([
-            html.Div("Scénario 2 — Prime de variance", style={
-                'fontSize': '11px', 'fontWeight': '700', 'letterSpacing': '1px',
-                'textTransform': 'uppercase', 'color': PALETTE['success'],
-                'marginBottom': '6px',
-            }),
-            html.P(
-                "P_R = E[R] + α_V·Var(R). À Var(R) fixé, le Quote-Part minimise Var(D). "
-                "Proportion optimale : a* = √(Var(R)/Var(S)).",
-                style={'fontSize': '12px', 'color': PALETTE['text_muted'],
-                       'lineHeight': '1.6', 'margin': 0},
-            ),
-        ], style=_info_box),
-
-        section_title("Distribution de S", PALETTE['success']),
-        _dist_params_block('s2', PALETTE['success']),
-
-        html.Div(style={'height': '1px', 'backgroundColor': PALETTE['border'],
-                        'marginBottom': '16px'}),
-        section_title("Paramètres de prime", PALETTE['success']),
-
-        html.Label("Chargement de variance α_V", style=_lbl),
-        html.Div([
-            dcc.Slider(id='s2-alpha-v', min=0, max=0.5, step=0.01, value=0.05,
-                       marks=_slider_marks_av,
-                       tooltip={'placement': 'bottom', 'always_visible': False}),
-        ], style={'marginBottom': '24px', 'paddingBottom': '8px'}),
-
-        html.Label("Var(R) / Var(S)", style=_lbl),
-        html.P("Fraction de la variance de S transférée au réassureur.", style={
-            'fontSize': '11px', 'color': PALETTE['text_muted'],
-            'marginBottom': '8px', 'lineHeight': '1.4',
-        }),
-        html.Div([
-            dcc.Slider(id='s2-q-frac', min=0.02, max=0.7, step=0.01, value=0.25,
-                       marks=_slider_marks_q,
-                       tooltip={'placement': 'bottom', 'always_visible': False}),
-        ], style={'marginBottom': '20px', 'paddingBottom': '8px'}),
-
-    ], style={'width': '260px', 'flexShrink': '0'})
-
-
-def _charts_area_s1():
-    return html.Div([
-        # Row 1: PDF + CDF
-        html.Div([
-            html.Div([
-                dcc.Loading(dcc.Graph(id='s1-chart-pdf', config={'displayModeBar': False}),
-                            color=PALETTE['accent2'], type='dot'),
-            ], style={'flex': '1', 'minWidth': '0'}),
-            html.Div([
-                dcc.Loading(dcc.Graph(id='s1-chart-cdf', config={'displayModeBar': False}),
-                            color=PALETTE['accent2'], type='dot'),
-            ], style={'flex': '1', 'minWidth': '0'}),
-        ], style={'display': 'flex', 'gap': '16px', 'marginBottom': '16px'}),
-
-        # Row 2: Var(D) vs b
-        dcc.Loading(dcc.Graph(id='s1-chart-var', config={'displayModeBar': False}),
-                    color=PALETTE['accent2'], type='dot'),
-
-        # Metrics
-        html.Div(id='s1-metrics', style={
-            'display': 'flex', 'gap': '12px', 'flexWrap': 'wrap',
-            'marginTop': '16px',
-        }),
-
-        # Why box
-        html.Div([
-            html.Div("Pourquoi le Stop-Loss gagne ici ?", style={
-                'fontSize': '11px', 'fontWeight': '700', 'letterSpacing': '1px',
-                'textTransform': 'uppercase', 'color': PALETTE['accent2'],
-                'marginBottom': '8px',
-            }),
-            html.P(
-                "Sous le principe de la valeur espérée, la contrainte fixe E[R] — donc E[D]. "
-                "La CDF de D_SL = min(S, b*) croise celle de tout autre D en un seul point (en b*) : "
-                "c'est la condition nécessaire et suffisante pour dominer au sens de la variance. "
-                "Le QS, à même coût, élimine la queue droite moins efficacement.",
-                style={'margin': 0, 'fontSize': '13px'},
-            ),
-        ], style=_why_box_s1),
-    ], style={'flex': '1', 'minWidth': '0'})
-
-
-def _charts_area_s2():
-    return html.Div([
-        # Row 1: Var(D) vs a + Distributions
-        html.Div([
-            html.Div([
-                dcc.Loading(dcc.Graph(id='s2-chart-var', config={'displayModeBar': False}),
-                            color=PALETTE['success'], type='dot'),
-            ], style={'flex': '1', 'minWidth': '0'}),
-            html.Div([
-                dcc.Loading(dcc.Graph(id='s2-chart-dist', config={'displayModeBar': False}),
-                            color=PALETTE['success'], type='dot'),
-            ], style={'flex': '1', 'minWidth': '0'}),
-        ], style={'display': 'flex', 'gap': '16px', 'marginBottom': '16px'}),
-
-        # Row 2: Correlation
-        dcc.Loading(dcc.Graph(id='s2-chart-cor', config={'displayModeBar': False}),
-                    color=PALETTE['success'], type='dot'),
-
-        # Metrics
-        html.Div(id='s2-metrics', style={
-            'display': 'flex', 'gap': '12px', 'flexWrap': 'wrap',
-            'marginTop': '16px',
-        }),
-
-        # Why box
-        html.Div([
-            html.Div("Pourquoi le Quote-Part gagne ici ?", style={
-                'fontSize': '11px', 'fontWeight': '700', 'letterSpacing': '1px',
-                'textTransform': 'uppercase', 'color': PALETTE['success'],
-                'marginBottom': '8px',
-            }),
-            html.P(
-                "Sous le principe de la variance, la contrainte fixe Var(R) — donc le chargement de sécurité. "
-                "L'inégalité de Cauchy-Schwarz donne Var(D) ≥ (1−a)²·Var(S), "
-                "et la borne inférieure est atteinte uniquement si R = a·S (proportionnalité stricte, Cor = 1). "
-                "Le Stop-Loss, avec Cor < 1, ne peut pas atteindre cette borne.",
-                style={'margin': 0, 'fontSize': '13px'},
-            ),
-        ], style=_why_box_s2),
-    ], style={'flex': '1', 'minWidth': '0'})
 
 
 PAGE_REASSURANCE = html.Div([
 
-    # ── Page header ──────────────────────────────────────────────────────────
-    html.Div([
-        html.H2("Optimisation du Programme de Réassurance", style={
-            'fontSize': '22px', 'fontWeight': '700', 'color': PALETTE['text'],
-            'margin': '0 0 6px 0', 'letterSpacing': '-0.3px',
-        }),
-        html.P(
-            "Critère : minimiser Var(D) — la variance de la perte retenue. "
-            "Le principe de prime du réassureur détermine entièrement le contrat optimal.",
-            style={'fontSize': '13px', 'color': PALETTE['text_muted'],
-                   'margin': 0, 'lineHeight': '1.6'},
-        ),
-    ], style={
-        'padding': '24px 28px 20px',
-        'borderBottom': f"1px solid {PALETTE['border']}",
-        'maxWidth': '1600px', 'margin': '0 auto',
-    }),
+    # ══════════════════════════════════════════════════════════════
+    # BANDE KPI — toujours visible, pleine largeur
+    # ══════════════════════════════════════════════════════════════
+    html.Div(
+        id='r-summary-kpis',
+        style={
+            'padding': '20px 24px 4px',
+            'maxWidth': '1600px',
+            'margin': '0 auto',
+        },
+    ),
 
-    # ── Two scenarios as tabs ─────────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════
+    # LAYOUT DEUX COLONNES
+    # ══════════════════════════════════════════════════════════════
     html.Div([
-        dcc.Tabs(
-            id='reass-tabs',
-            value='s1',
-            colors={
-                'border': PALETTE['border'],
-                'primary': PALETTE['accent2'],
-                'background': PALETTE['surface2'],
-            },
-            children=[
 
-                # ── SCÉNARIO 1 ──────────────────────────────────────────────
-                dcc.Tab(
-                    label='Scénario 1 — Prime valeur espérée → Stop-Loss optimal',
-                    value='s1',
-                    style=_tab_style,
-                    selected_style=_tab_sel_s1,
-                    children=[
-                        html.Div([
-                            card(_params_panel_s1(), style={
-                                'width': '260px', 'flexShrink': '0',
-                                'alignSelf': 'flex-start',
-                                'position': 'sticky', 'top': '16px',
-                            }),
-                            card(_charts_area_s1(), style={'flex': '1', 'minWidth': '0'}),
-                        ], style={
-                            'display': 'flex', 'gap': '20px',
-                            'padding': '20px 0 0 0',
-                        }),
+        # ── COLONNE GAUCHE ───────────────────────────────────────
+        html.Div([
+
+            # 1 — Simulation
+            card([
+                section_title("1 — Simulation", PALETTE['accent2']),
+                html.Div(id='r-model-status-banner'),
+
+                html.Details([
+                    html.Summary("⚙  Overrides distributions", style={
+                        'color': PALETTE['text_muted'], 'fontSize': '11px',
+                        'cursor': 'pointer', 'marginBottom': '8px',
+                        'letterSpacing': '0.5px', 'textTransform': 'uppercase',
+                    }),
+                    html.Div([
+                        html.Label("Sév. ↓ sous seuil", style=_lbl),
+                        dcc.Dropdown(id='r-override-bsev', clearable=True, placeholder="Auto (AIC)",
+                                     options=[{'label': v, 'value': k} for k, v in SEV_DIST_NAMES.items()],
+                                     style={'marginBottom': '6px'}),
+                        html.Label("Fréq. ↓ sous seuil", style=_lbl),
+                        dcc.Dropdown(id='r-override-bfreq', clearable=True, placeholder="Auto (AIC)",
+                                     options=[{'label': v, 'value': k} for k, v in FREQ_DIST_NAMES.items()],
+                                     style={'marginBottom': '6px'}),
+                        html.Label("Sév. ↑ au-dessus", style=_lbl),
+                        dcc.Dropdown(id='r-override-asev', clearable=True, placeholder="Auto (AIC)",
+                                     options=[{'label': v, 'value': k} for k, v in SEV_DIST_NAMES.items()],
+                                     style={'marginBottom': '6px'}),
+                        html.Label("Fréq. ↑ au-dessus", style=_lbl),
+                        dcc.Dropdown(id='r-override-afreq', clearable=True, placeholder="Auto (AIC)",
+                                     options=[{'label': v, 'value': k} for k, v in FREQ_DIST_NAMES.items()]),
+                    ], style={
+                        'backgroundColor': PALETTE['surface2'],
+                        'border': f"1px solid {PALETTE['border']}",
+                        'borderRadius': '6px', 'padding': '10px', 'marginBottom': '10px',
+                    }),
+                ], style={'marginBottom': '12px'}),
+
+                html.Label("Nb. de simulations", style=_lbl),
+                dcc.Input(id='r-nb-sims', type='number', value=5000, min=100, max=100000, step=500,
+                          style={**_inp, 'marginBottom': '12px'}),
+                btn_primary("⚙  Générer Simulations", id='r-btn-simuler'),
+                html.Div(id='r-sim-status', style={
+                    'color': PALETTE['success'], 'fontSize': '11px',
+                    'marginTop': '8px', 'textAlign': 'center', 'lineHeight': '1.6',
+                }),
+            ], style={'marginBottom': '14px'}),
+
+            # 2 — Configurer Traité
+            card([
+                section_title("2 — Configurer Traité", PALETTE['warning']),
+                dcc.Dropdown(
+                    id='r-type-traite',
+                    options=[
+                        {'label': 'Excess of Loss (XS)', 'value': 'XS'},
+                        {'label': 'Quote-Part (QP)', 'value': 'QP'},
                     ],
+                    value='XS',
+                    style={'marginBottom': '10px'},
                 ),
 
-                # ── SCÉNARIO 2 ──────────────────────────────────────────────
-                dcc.Tab(
-                    label='Scénario 2 — Prime de variance → Quote-Part optimal',
-                    value='s2',
-                    style=_tab_style,
-                    selected_style=_tab_sel_s2,
-                    children=[
-                        html.Div([
-                            card(_params_panel_s2(), style={
-                                'width': '260px', 'flexShrink': '0',
-                                'alignSelf': 'flex-start',
-                                'position': 'sticky', 'top': '16px',
-                            }),
-                            card(_charts_area_s2(), style={'flex': '1', 'minWidth': '0'}),
-                        ], style={
-                            'display': 'flex', 'gap': '20px',
-                            'padding': '20px 0 0 0',
-                        }),
-                    ],
-                ),
-            ],
-        ),
+                html.Div(id='r-container-qp', children=[
+                    html.Label("Rétention cédante (%)", style=_lbl),
+                    dcc.Input(id='r-in-qp-taux', type='number', value=0.8, step=0.05,
+                              style={**_inp, 'marginBottom': '8px'}),
+                ], style={'display': 'none'}),
+
+                html.Div(id='r-container-xs', children=[
+                    html.Label("Priorité (€)", style=_lbl),
+                    dcc.Input(id='r-in-xs-prio', type='number', value=100000,
+                              style={**_inp, 'marginBottom': '8px'}),
+                    html.Label("Portée (€)", style=_lbl),
+                    dcc.Input(id='r-in-xs-portee', type='number', value=500000,
+                              style={**_inp, 'marginBottom': '8px'}),
+                ], style={'display': 'block'}),
+
+                html.Div([
+                    html.Button("+ Couche", id='r-btn-add-layer', n_clicks=0, style={
+                        'width': '48%', 'backgroundColor': 'transparent',
+                        'color': PALETTE['warning'], 'border': f"1px solid {PALETTE['warning']}",
+                        'borderRadius': '6px', 'padding': '8px', 'cursor': 'pointer',
+                        'fontWeight': '700', 'fontSize': '12px',
+                    }),
+                    html.Button("– Retirer", id='r-btn-remove-layer', n_clicks=0, style={
+                        'width': '48%', 'float': 'right', 'backgroundColor': 'transparent',
+                        'color': PALETTE['text_muted'], 'border': f"1px solid {PALETTE['border']}",
+                        'borderRadius': '6px', 'padding': '8px', 'cursor': 'pointer',
+                        'fontWeight': '600', 'fontSize': '12px',
+                    }),
+                ], style={'overflow': 'hidden', 'marginBottom': '10px'}),
+
+                # Aperçu du stack courant
+                html.Div(id='r-current-stack-display', style={
+                    'backgroundColor': PALETTE['surface2'],
+                    'border': f"1px solid {PALETTE['warning']}44",
+                    'borderLeft': f"3px solid {PALETTE['warning']}",
+                    'borderRadius': '6px', 'padding': '10px', 'fontSize': '12px',
+                    'color': PALETTE['warning'], 'fontFamily': "'JetBrains Mono', monospace",
+                    'minHeight': '36px', 'marginBottom': '12px', 'lineHeight': '1.6',
+                }),
+
+                html.Label("Nom du programme", style=_lbl),
+                dcc.Input(id='r-prog-name', type='text', placeholder="ex: A — 100k xs 500k",
+                          style={**_inp, 'marginBottom': '10px'}),
+                btn_primary("✓  Valider & Tracer", id='r-btn-save-prog'),
+            ], style={'marginBottom': '14px'}),
+
+            # 3 — Zone cible & Gestion
+            card([
+                section_title("3 — Zone cible & Gestion", PALETTE['danger']),
+
+                html.Label("Filtrer par Écart-type (σ)", style=_lbl),
+                html.Div([
+                    dcc.Input(id='r-std-min', type='number', placeholder="Min σ",
+                              style={**_inp, 'width': '48%'}),
+                    dcc.Input(id='r-std-max', type='number', placeholder="Max σ",
+                              style={**_inp, 'width': '48%', 'float': 'right'}),
+                ], style={'overflow': 'hidden', 'marginBottom': '16px'}),
+
+                html.Label("Supprimer un programme", style=_lbl),
+                html.Div([
+                    html.Div(
+                        dcc.Dropdown(id='r-prog-to-delete', placeholder="Choisir…"),
+                        style={'width': '63%', 'display': 'inline-block'},
+                    ),
+                    html.Button('Suppr.', id='r-btn-delete-prog', n_clicks=0, style={
+                        'width': '33%', 'float': 'right', 'backgroundColor': 'transparent',
+                        'color': PALETTE['danger'], 'border': f"1px solid {PALETTE['danger']}",
+                        'borderRadius': '6px', 'padding': '8px', 'cursor': 'pointer',
+                        'fontWeight': '700', 'fontSize': '12px',
+                    }),
+                ], style={'overflow': 'hidden', 'marginBottom': '10px'}),
+
+                html.Button('✕  Tout vider (sauf Brut)', id='r-btn-reset', n_clicks=0, style={
+                    'width': '100%', 'backgroundColor': 'transparent',
+                    'color': PALETTE['text_muted'], 'border': f"1px solid {PALETTE['border']}",
+                    'borderRadius': '6px', 'padding': '8px', 'cursor': 'pointer',
+                    'fontWeight': '600', 'fontSize': '12px',
+                }),
+            ]),
+
+        ], style={'width': '272px', 'flexShrink': '0'}),
+
+        # ── COLONNE DROITE — onglets ─────────────────────────────
+        html.Div([
+            dcc.Tabs(
+                id='r-results-tabs',
+                value='r-tab-metrics',
+                colors={
+                    "border": PALETTE['border'],
+                    "primary": PALETTE['accent2'],
+                    "background": PALETTE['surface2'],
+                },
+                children=[
+
+                    # TAB 1 — Indicateurs
+                    dcc.Tab(
+                        label='Indicateurs',
+                        value='r-tab-metrics',
+                        style=_tab_style,
+                        selected_style={**_tab_selected_style,
+                                        'borderTop': f"2px solid {PALETTE['accent2']}"},
+                        children=[
+                            card([
+                                # Légende métrique
+                                html.Div([
+                                    html.Span("% de réduction par rapport à la position BRUT (sans réassurance).",
+                                              style={'color': PALETTE['text_muted'], 'fontSize': '12px'}),
+                                    html.Span("  ▼ Plus la barre est longue, meilleure est la protection.",
+                                              style={'color': PALETTE['success'], 'fontSize': '12px', 'fontWeight': '600'}),
+                                ], style={'marginBottom': '16px',
+                                          'backgroundColor': f"{PALETTE['surface2']}",
+                                          'border': f"1px solid {PALETTE['border']}",
+                                          'borderRadius': '6px', 'padding': '10px 14px'}),
+                                dcc.Loading(
+                                    dcc.Graph(id='r-metrics-graph', config={'displayModeBar': False}),
+                                    color=PALETTE['accent2'], type='dot',
+                                ),
+                            ]),
+                        ],
+                    ),
+
+                    # TAB 2 — Frontière efficace
+                    dcc.Tab(
+                        label='Frontière efficace',
+                        value='r-tab-frontier',
+                        style=_tab_style,
+                        selected_style={**_tab_selected_style,
+                                        'borderTop': f"2px solid {PALETTE['accent']}"},
+                        children=[
+                            card([
+                                html.Div([
+                                    html.Span(
+                                        "Chaque point = un programme. L'optimum se trouve en bas à gauche "
+                                        "(charge faible ET variabilité faible). Survolez un point pour voir ses indicateurs.",
+                                        style={'color': PALETTE['text_muted'], 'fontSize': '12px'},
+                                    ),
+                                ], style={'marginBottom': '12px',
+                                          'backgroundColor': PALETTE['surface2'],
+                                          'border': f"1px solid {PALETTE['border']}",
+                                          'borderRadius': '6px', 'padding': '10px 14px'}),
+                                dcc.Loading(
+                                    dcc.Graph(id='r-frontiere-graph'),
+                                    color=PALETTE['accent'], type='dot',
+                                ),
+                            ]),
+                        ],
+                    ),
+
+                    # TAB 3 — OEP
+                    dcc.Tab(
+                        label='Courbe OEP',
+                        value='r-tab-oep',
+                        style=_tab_style,
+                        selected_style={**_tab_selected_style,
+                                        'color': '#A78BFA',
+                                        'borderTop': "2px solid #A78BFA"},
+                        children=[
+                            card([
+                                html.Div([
+                                    html.Span(
+                                        "Probabilité de dépasser X€ de perte dans l'année. "
+                                        "Les lignes pointillées marquent les seuils 1/20 ans et 1/100 ans.",
+                                        style={'color': PALETTE['text_muted'], 'fontSize': '12px'},
+                                    ),
+                                ], style={'marginBottom': '12px',
+                                          'backgroundColor': PALETTE['surface2'],
+                                          'border': f"1px solid {PALETTE['border']}",
+                                          'borderRadius': '6px', 'padding': '10px 14px'}),
+                                dcc.Loading(
+                                    dcc.Graph(id='r-oep-graph'),
+                                    color='#A78BFA', type='dot',
+                                ),
+                                # Tableau des valeurs aux points de référence
+                                html.Div(id='r-oep-ref-table', style={'marginTop': '16px'}),
+                            ]),
+                        ],
+                    ),
+
+                    # TAB 4 — Retenu / Cédé
+                    dcc.Tab(
+                        label='Retenu / Cédé',
+                        value='r-tab-retained',
+                        style=_tab_style,
+                        selected_style={**_tab_selected_style,
+                                        'color': PALETTE['warning'],
+                                        'borderTop': f"2px solid {PALETTE['warning']}"},
+                        children=[
+                            card([
+                                html.Div([
+                                    html.Label("Sélectionner un programme", style={**_lbl, 'marginBottom': '6px'}),
+                                    dcc.Dropdown(
+                                        id='r-detail-prog-dropdown',
+                                        placeholder="Sélectionner un programme…",
+                                    ),
+                                ], style={'marginBottom': '16px'}),
+                                # KPI strip du programme sélectionné
+                                html.Div(id='r-retained-kpis', style={'marginBottom': '16px'}),
+                                dcc.Loading(
+                                    dcc.Graph(id='r-retained-ceded-graph'),
+                                    color=PALETTE['warning'], type='dot',
+                                ),
+                            ]),
+                        ],
+                    ),
+
+                    # TAB 5 — Sensibilité XS
+                    dcc.Tab(
+                        label='Sensibilité XS',
+                        value='r-tab-heatmap',
+                        style=_tab_style,
+                        selected_style={**_tab_selected_style,
+                                        'color': PALETTE['success'],
+                                        'borderTop': f"2px solid {PALETTE['success']}"},
+                        children=[
+                            card([
+                                html.Div([
+                                    html.Span(
+                                        "ESP net retenu pour chaque combinaison (Priorité, Portée) XS. "
+                                        "Vert foncé = charge minimale = meilleure protection.",
+                                        style={'color': PALETTE['text_muted'], 'fontSize': '12px'},
+                                    ),
+                                ], style={'marginBottom': '16px',
+                                          'backgroundColor': PALETTE['surface2'],
+                                          'border': f"1px solid {PALETTE['border']}",
+                                          'borderRadius': '6px', 'padding': '10px 14px'}),
+
+                                html.Div([
+                                    html.Div([
+                                        html.Label("Priorité min (€)", style=_lbl),
+                                        dcc.Input(id='r-heatmap-prio-min', type='number', value=50000,
+                                                  style=_inp),
+                                    ], style={'flex': '1'}),
+                                    html.Div([
+                                        html.Label("Priorité max (€)", style=_lbl),
+                                        dcc.Input(id='r-heatmap-prio-max', type='number', value=500000,
+                                                  style=_inp),
+                                    ], style={'flex': '1'}),
+                                    html.Div([
+                                        html.Label("Portée min (€)", style=_lbl),
+                                        dcc.Input(id='r-heatmap-portee-min', type='number', value=100000,
+                                                  style=_inp),
+                                    ], style={'flex': '1'}),
+                                    html.Div([
+                                        html.Label("Portée max (€)", style=_lbl),
+                                        dcc.Input(id='r-heatmap-portee-max', type='number', value=1000000,
+                                                  style=_inp),
+                                    ], style={'flex': '1'}),
+                                    html.Div([
+                                        html.Label("Résolution", style=_lbl),
+                                        dcc.Input(id='r-heatmap-steps', type='number', value=8, min=4, max=20,
+                                                  style=_inp),
+                                    ], style={'flex': '0 0 100px'}),
+                                ], style={'display': 'flex', 'gap': '10px', 'marginBottom': '14px'}),
+
+                                btn_primary("Calculer la Heatmap", id='r-btn-heatmap'),
+                                html.Div(id='r-heatmap-status', style={
+                                    'color': PALETTE['success'], 'fontSize': '11px',
+                                    'marginTop': '8px', 'textAlign': 'center',
+                                }),
+                                dcc.Loading(
+                                    dcc.Graph(id='r-heatmap-graph'),
+                                    color=PALETTE['success'], type='dot',
+                                ),
+                            ]),
+                        ],
+                    ),
+
+                    # TAB 6 — Tous les programmes (tableau)
+                    dcc.Tab(
+                        label='Programmes',
+                        value='r-tab-all',
+                        style=_tab_style,
+                        selected_style=_tab_selected_style,
+                        children=[
+                            card([
+                                section_title("Comparatif de tous les programmes"),
+                                html.Div([
+                                    html.Span("▼ vert = réduction vs Brut · ▲ rouge = dégradation",
+                                              style={'color': PALETTE['text_muted'], 'fontSize': '11px'}),
+                                ], style={'marginBottom': '14px'}),
+                                dcc.Loading(
+                                    html.Div(id='r-programs-table-container'),
+                                    color=PALETTE['accent'], type='dot',
+                                ),
+                            ]),
+                        ],
+                    ),
+
+                    # TAB 7 — Zone cible
+                    dcc.Tab(
+                        label='Zone cible',
+                        value='r-tab-filtered',
+                        style=_tab_style,
+                        selected_style={**_tab_selected_style,
+                                        'color': PALETTE['success'],
+                                        'borderTop': f"2px solid {PALETTE['success']}"},
+                        children=[
+                            card([
+                                section_title("Programmes dans la zone cible (σ filtré)", PALETTE['success']),
+                                html.Div(id='r-filtered-programs-table-container'),
+                            ], style={'borderLeft': f"3px solid {PALETTE['success']}"}),
+                        ],
+                    ),
+
+                ],
+            ),
+        ], style={'flex': '1', 'minWidth': '0'}),
+
     ], style={
-        'padding': '0 28px 32px',
+        'display': 'flex',
+        'gap': '20px',
+        'padding': '8px 24px 24px',
         'maxWidth': '1600px',
         'margin': '0 auto',
     }),
