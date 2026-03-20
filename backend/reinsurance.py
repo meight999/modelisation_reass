@@ -2,8 +2,11 @@ import numpy as np
 from scipy import stats
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Sampling helpers
+# ─────────────────────────────────────────────────────────────────────────────
+
 def sample_from_dist(dist_name, params, n_samples):
-    """Tire n_samples sévérités depuis la distribution calibrée."""
     if dist_name == 'gamma':
         return stats.gamma.rvs(params['shape'], scale=params['scale'], size=n_samples)
     elif dist_name == 'lognorm':
@@ -17,7 +20,6 @@ def sample_from_dist(dist_name, params, n_samples):
 
 
 def sample_freq(dist_name, params):
-    """Tire un entier depuis la loi de fréquence."""
     if dist_name == 'poisson':
         return int(stats.poisson.rvs(params['lambda']))
     elif dist_name == 'neg_binomial':
@@ -27,6 +29,10 @@ def sample_freq(dist_name, params):
     return 0
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Simulation
+# ─────────────────────────────────────────────────────────────────────────────
+
 def simuler_depuis_distributions(
     n_sims,
     below_sev_dist, below_sev_params,
@@ -35,55 +41,37 @@ def simuler_depuis_distributions(
     above_freq_dist, above_freq_params,
     seed=42,
 ):
-    """
-    Génère n_sims années de sinistres par simulation fréquence × sévérité.
-
-    Chaque année est un dict {'below': [sev1, sev2, ...], 'above': [sev1, ...]},
-    avec below = sinistres attritionnels (sous le seuil) et above = sinistres graves.
-    Les deux pools sont conservés séparément pour permettre l'application
-    correcte des traités de réassurance par nature de sinistre.
-    """
     np.random.seed(seed)
     simulations = []
     for _ in range(n_sims):
         annee = {'below': [], 'above': []}
-
-        # Sinistres attritionnels (sous le seuil)
         if below_freq_params and below_sev_params:
             n_b = sample_freq(below_freq_dist, below_freq_params)
             if n_b > 0:
-                sev_b = sample_from_dist(below_sev_dist, below_sev_params, n_b)
-                annee['below'] = sev_b.tolist()
-
-        # Sinistres graves (au-dessus du seuil)
+                annee['below'] = sample_from_dist(below_sev_dist, below_sev_params, n_b).tolist()
         if above_freq_params and above_sev_params:
             n_a = sample_freq(above_freq_dist, above_freq_params)
             if n_a > 0:
-                sev_a = sample_from_dist(above_sev_dist, above_sev_params, n_a)
-                annee['above'] = sev_a.tolist()
-
+                annee['above'] = sample_from_dist(above_sev_dist, above_sev_params, n_a).tolist()
         simulations.append(annee)
     return simulations
 
 
-def _appliquer_traite_sinistres(sinistres, traite):
-    """
-    Applique un traité de réassurance à un vecteur de sinistres (numpy array).
-    Retourne le vecteur net (charge retenue après cession).
+# ─────────────────────────────────────────────────────────────────────────────
+# Traités
+# ─────────────────────────────────────────────────────────────────────────────
 
-    - QP  : rétention = taux_retention × montant brut par sinistre
-    - XS  : net = brut - min(max(brut - priorite, 0), portee)  par sinistre
-    """
+def _appliquer_traite_sinistres(sinistres, traite):
     if len(sinistres) == 0:
         return sinistres
     c = np.asarray(sinistres, dtype=float)
     if traite['type'] == 'QP':
         taux = float(traite['taux_retention'])
         if not (0.0 < taux <= 1.0):
-            raise ValueError(f"Taux de rétention QP invalide : {taux} (attendu dans ]0, 1])")
+            raise ValueError(f"Taux de rétention QP invalide : {taux}")
         return c * taux
     elif traite['type'] == 'XS':
-        prio = float(traite['priorite'])
+        prio   = float(traite['priorite'])
         portee = float(traite['portee'])
         if prio < 0 or portee <= 0:
             raise ValueError(f"Paramètres XS invalides : priorité={prio}, portée={portee}")
@@ -94,10 +82,7 @@ def _appliquer_traite_sinistres(sinistres, traite):
 
 
 def compute_charges(simulations, liste_traites):
-    """
-    Calcule le vecteur complet des charges nettes annuelles après application du programme.
-    Utilisé par appliquer_programme et stats_programme.
-    """
+    """Vecteur des charges nettes S-R par simulation."""
     charges = []
     for annee in simulations:
         if isinstance(annee, dict):
@@ -113,32 +98,8 @@ def compute_charges(simulations, liste_traites):
     return np.array(charges, dtype=float)
 
 
-def appliquer_programme(simulations, liste_traites):
-    """Retourne (espérance, écart-type) des charges nettes annuelles."""
-    charges = compute_charges(simulations, liste_traites)
-    return float(np.mean(charges)), float(np.std(charges, ddof=1))
-
-
-def stats_programme(simulations, liste_traites):
-    """
-    Retourne (espérance, écart-type, VaR95, VaR99, TVaR99) des charges nettes.
-    TVaR99 = moyenne conditionnelle au-delà du quantile 99%.
-    """
-    charges = compute_charges(simulations, liste_traites)
-    esp  = float(np.mean(charges))
-    std  = float(np.std(charges, ddof=1))
-    var95 = float(np.percentile(charges, 95))
-    var99 = float(np.percentile(charges, 99))
-    tail  = charges[charges >= var99]
-    tvar99 = float(np.mean(tail)) if len(tail) > 0 else var99
-    return esp, std, var95, var99, tvar99
-
-
 def compute_ceded_charges(simulations, liste_traites):
-    """
-    Retourne (gross_arr, net_arr) : charge brute et charge nette par simulation.
-    La différence gross - net = montant cédé.
-    """
+    """Retourne (gross_arr S, net_arr S-R) par simulation."""
     gross_list, net_list = [], []
     for annee in simulations:
         if isinstance(annee, dict):
@@ -157,11 +118,156 @@ def compute_ceded_charges(simulations, liste_traites):
     return np.array(gross_list, dtype=float), np.array(net_list, dtype=float)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Principe de prime de réassurance (NOUVEAU)
+# ─────────────────────────────────────────────────────────────────────────────
+
+PREMIUM_PRINCIPLES = {
+    'expected_value': "Valeur espérée  —  P_R = (1+θ)·E[R]",
+    'std_deviation':  "Écart-type       —  P_R = E[R] + α·Std(R)",
+    'variance':       "Variance         —  P_R = E[R] + α·Var(R)",
+}
+
+PREMIUM_DEFAULTS = {
+    'expected_value': 0.20,
+    'std_deviation':  0.20,
+    'variance':       0.01,
+}
+
+
+def compute_premium(R_arr, principle, param):
+    """
+    Calcule la prime de réassurance P_R.
+    R_arr : vecteur des montants cédés R_i = S_i - (S_i - R_i)
+    Retourne (P_R, {'E_R', 'Std_R', 'Var_R'})
+    """
+    R = np.asarray(R_arr, dtype=float)
+    E_R   = float(np.mean(R))
+    Var_R = float(np.var(R, ddof=1))
+    Std_R = float(np.std(R, ddof=1))
+    p = float(param)
+    if principle == 'expected_value':
+        P_R = (1.0 + p) * E_R
+    elif principle == 'std_deviation':
+        P_R = E_R + p * Std_R
+    elif principle == 'variance':
+        P_R = E_R + p * Var_R
+    else:
+        raise ValueError(f"Principe inconnu : {principle}")
+    return float(P_R), {'E_R': E_R, 'Std_R': Std_R, 'Var_R': Var_R}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Statistiques complètes brut / cédé / net avec prime (NOUVEAU)
+# D = S - R + P_R
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _var_tvar(arr, level):
+    v = float(np.percentile(arr, level * 100))
+    tail = arr[arr >= v]
+    tv = float(np.mean(tail)) if len(tail) > 0 else v
+    return v, tv
+
+
+def compute_full_stats(simulations, liste_traites, principle='expected_value',
+                       param=0.20, capital=None):
+    """
+    Retourne toutes les métriques brut/cédé/net avec D = S - R + P_R.
+
+    Clés retournées :
+      'gross'         métriques sur S
+      'ceded'         métriques sur R
+      'net'           métriques sur D = S-R+P_R
+      'premium'       {P_R, principle, param, E_R, Std_R, Var_R}
+      'profitability' {risk_reduction, cost_of_reins, expected_result_net}
+      '_S', '_R', '_D' vecteurs numpy pour les graphiques
+    """
+    S_arr, net_no_prem = compute_ceded_charges(simulations, liste_traites)
+    R_arr = S_arr - net_no_prem
+
+    if liste_traites:
+        P_R, meta = compute_premium(R_arr, principle, param)
+    else:
+        P_R  = 0.0
+        meta = {'E_R': 0.0, 'Std_R': 0.0, 'Var_R': 0.0}
+
+    D_arr = net_no_prem + P_R
+
+    def _metrics(arr):
+        v95,  tv95  = _var_tvar(arr, 0.95)
+        v99,  tv99  = _var_tvar(arr, 0.99)
+        v995, _     = _var_tvar(arr, 0.995)
+        ruin = float(np.mean(arr > capital)) if capital is not None else None
+        return {
+            'mean':   float(np.mean(arr)),
+            'std':    float(np.std(arr, ddof=1)),
+            'var':    float(np.var(arr, ddof=1)),
+            'var95':  v95,  'tvar95':  tv95,
+            'var99':  v99,  'tvar99':  tv99,
+            'var995': v995,
+            'ruin':   ruin,
+        }
+
+    gross_m = _metrics(S_arr)
+    ceded_m = _metrics(R_arr)
+    net_m   = _metrics(D_arr)
+
+    return {
+        'gross':   gross_m,
+        'ceded':   ceded_m,
+        'net':     net_m,
+        'premium': {
+            'P_R':       P_R,
+            'principle': principle,
+            'param':     float(param),
+            'E_R':       meta['E_R'],
+            'Std_R':     meta['Std_R'],
+            'Var_R':     meta['Var_R'],
+        },
+        'profitability': {
+            'risk_reduction':      gross_m['tvar99'] - net_m['tvar99'],
+            'cost_of_reins':       P_R,
+            'expected_result_net': gross_m['mean'] - net_m['mean'],
+        },
+        '_S': S_arr,
+        '_R': R_arr,
+        '_D': D_arr,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fonctions historiques — conservées pour compatibilité
+# ─────────────────────────────────────────────────────────────────────────────
+
+def appliquer_programme(simulations, liste_traites):
+    charges = compute_charges(simulations, liste_traites)
+    return float(np.mean(charges)), float(np.std(charges, ddof=1))
+
+
+def stats_programme(simulations, liste_traites):
+    """Retourne (esp, std, var95, var99, var995, tvar99) — 6 valeurs — sur S-R."""
+    charges = compute_charges(simulations, liste_traites)
+    esp    = float(np.mean(charges))
+    std    = float(np.std(charges, ddof=1))
+    var95  = float(np.percentile(charges, 95))
+    var99  = float(np.percentile(charges, 99))
+    var995 = float(np.percentile(charges, 99.5))
+    tail   = charges[charges >= var99]
+    tvar99 = float(np.mean(tail)) if len(tail) > 0 else var99
+    return esp, std, var95, var99, var995, tvar99
+
+
+def compute_return_period_values(charges, return_periods=(5, 10, 20, 50, 100, 200)):
+    n = len(charges)
+    sorted_ch = np.sort(charges)[::-1]
+    result = {}
+    for rp in return_periods:
+        idx = max(0, min(n - 1, int(round(n / rp)) - 1))
+        result[rp] = float(sorted_ch[idx])
+    return result
+
+
 def compute_oep_curve(charges):
-    """
-    Retourne (return_periods, sorted_charges) pour la courbe d'excédance de pertes.
-    Période de retour = n_simulations / rang (du plus grand au plus petit).
-    """
     n = len(charges)
     sorted_charges = np.sort(charges)[::-1]
     ranks = np.arange(1, n + 1)
@@ -170,10 +276,6 @@ def compute_oep_curve(charges):
 
 
 def compute_heatmap(simulations, prio_list, portee_list):
-    """
-    Calcule la matrice des charges nettes moyennes pour une grille (priorité × portée).
-    Rows = portée, Cols = priorité.
-    """
     matrix = np.zeros((len(portee_list), len(prio_list)))
     for j, prio in enumerate(prio_list):
         for i, portee in enumerate(portee_list):

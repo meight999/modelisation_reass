@@ -87,7 +87,7 @@ PAGE_MODELISATION = html.Div([
                                          colors={"border": PALETTE['border'], "primary": PALETTE['success'],
                                                  "background": PALETTE['surface2']},
                                          children=[
-                                    dcc.Tab(label='📊  Sévérité', value='below-sev',
+                                    dcc.Tab(label='Sévérité', value='below-sev',
                                             style={'color': PALETTE['text_muted'], 'fontSize': '13px',
                                                    'backgroundColor': PALETTE['surface2'], 'padding': '8px 18px'},
                                             selected_style={'color': PALETTE['success'], 'fontWeight': '700',
@@ -106,7 +106,7 @@ PAGE_MODELISATION = html.Div([
                                                     html.Div(id='below-content', style={'minHeight': '320px', 'paddingTop': '20px'}),
                                                     color=PALETTE['accent'], type='dot'),
                                             ])]),
-                                    dcc.Tab(label='📈  Fréquence', value='below-freq',
+                                    dcc.Tab(label='Fréquence', value='below-freq',
                                             style={'color': PALETTE['text_muted'], 'fontSize': '13px',
                                                    'backgroundColor': PALETTE['surface2'], 'padding': '8px 18px'},
                                             selected_style={'color': PALETTE['below_freq'], 'fontWeight': '700',
