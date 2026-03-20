@@ -1,5 +1,0 @@
-pandas
-openpyxl
-dash
-numpy
-plotly
