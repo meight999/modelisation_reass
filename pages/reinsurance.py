@@ -396,7 +396,7 @@ PAGE_REASSURANCE = html.Div([
                 ], style={'marginBottom': '12px'}),
 
                 html.Label("Nb. de simulations", style=_lbl),
-                dcc.Input(id='r-nb-sims', type='number', value=5000, min=100, max=100000, step=500,
+                dcc.Input(id='r-nb-sims', type='number', value=None, placeholder='ex: 1000', min=100, max=50000, step=100, debounce=True,
                           style={**_inp, 'marginBottom': '12px'}),
                 btn_primary("⚙  Générer Simulations", id='r-btn-simuler'),
                 html.Div(id='r-sim-status', style={

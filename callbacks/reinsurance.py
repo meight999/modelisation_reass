@@ -10,6 +10,7 @@ from backend.reinsurance import (
     simuler_depuis_distributions, stats_programme, formater_description,
     compute_ceded_charges, compute_oep_curve, compute_heatmap, compute_charges,
     compute_full_stats, compute_premium, PREMIUM_PRINCIPLES,
+    serialize_simulations, deserialize_simulations,
 )
 from components.ui import plotly_layout
 
@@ -100,6 +101,11 @@ def _get_premium_param(principle, loading, alpha_std, alpha_var):
         return float(alpha_std) if alpha_std is not None else 0.20
     else:
         return float(alpha_var) if alpha_var is not None else 0.01
+
+
+def _ds(sims):
+    """Désérialise les simulations depuis le dcc.Store avant calcul."""
+    return deserialize_simulations(sims)
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -210,7 +216,8 @@ def r_run_simulations(n, n_sims, below_fits, above_fits, below_freq_store, above
     if not bsev_params and not asev_params:
         return dash.no_update, dash.no_update, "⚠ Aucune distribution — lancez la modélisation d'abord."
 
-    n_sims = int(n_sims or 5000)
+    n_sims = int(n_sims) if n_sims is not None else 1000
+    n_sims = max(100, min(50000, n_sims))  # borne de sécurité
     sims = simuler_depuis_distributions(
         n_sims, bsd, bsev_params, bfd, bfreq_params, asd, asev_params, afd, afreq_params,
     )
@@ -236,7 +243,7 @@ def r_run_simulations(n, n_sims, below_fits, above_fits, below_freq_store, above
         'desc': 'Sans réassurance',
         'stack': [],
     }]
-    return sims, brut_entry, status
+    return serialize_simulations(sims), brut_entry, status
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -348,14 +355,14 @@ def r_manage_programs(n_save, n_del, n_reset, stack, name, saved, sims, prog_to_
         param = _get_premium_param(principle, loading, alpha_std, alpha_var)
 
         # Stats brutes S (6 valeurs)
-        e, s, v95, v99, v995, tv99 = stats_programme(sims, traites)
+        e, s, v95, v99, v995, tv99 = stats_programme(_ds(sims), traites)
 
         # Stats nettes D = S-R+P_R
-        full = compute_full_stats(sims, traites, principle=principle, param=param)
+        full = compute_full_stats(_ds(sims), traites, principle=principle, param=param)
         net_m = full['net']
         prem  = full['premium']
 
-        gross_arr, net_arr = compute_ceded_charges(sims, traites)
+        gross_arr, net_arr = compute_ceded_charges(_ds(sims), traites)
         mean_gross = float(np.mean(gross_arr))
         bc = float(np.mean(gross_arr - net_arr) / mean_gross) if mean_gross > 0 else 0.0
 
@@ -428,28 +435,39 @@ def r_manage_programs(n_save, n_del, n_reset, stack, name, saved, sims, prog_to_
      Output('r-profit-result',    'children'),
      Output('r-profit-cost',      'children'),
      Output('r-profit-reduction', 'children')],
-    [Input('r-simulations-store',   'data'),
-     Input('r-current-stack-store', 'data'),
-     Input('r-premium-principle',   'value'),
-     Input('r-premium-loading',     'value'),
-     Input('r-premium-alpha-std',   'value'),
-     Input('r-premium-alpha-var',   'value'),
-     Input('r-capital-input',       'value')],
+    [Input('r-simulations-store',    'data'),
+     Input('r-detail-prog-dropdown', 'value'),
+     Input('r-saved-programs-store', 'data'),
+     Input('r-premium-principle',    'value'),
+     Input('r-premium-loading',      'value'),
+     Input('r-premium-alpha-std',    'value'),
+     Input('r-premium-alpha-var',    'value'),
+     Input('r-capital-input',        'value')],
 )
-def r_update_indicators(sims, stack, principle, loading, alpha_std, alpha_var, capital):
+def r_update_indicators(sims, prog_id, progs, principle, loading, alpha_std, alpha_var, capital):
     na = '—'
     empty = tuple([na] * 29)
 
     if not sims:
         return empty
 
-    traites   = stack or []
+    # Lire le stack depuis le programme sélectionné
+    # Si prog_id est None, prendre le premier programme non-brut disponible
+    traites = []
+    if progs:
+        if prog_id:
+            prog = next((p for p in progs if p['id'] == prog_id), None)
+        else:
+            prog = next((p for p in progs if p['id'] != 'brut'), None)
+        if prog:
+            traites = prog.get('stack', [])
+
     principle = principle or 'expected_value'
     param     = _get_premium_param(principle, loading, alpha_std, alpha_var)
     cap       = float(capital) if capital else None
 
     try:
-        full = compute_full_stats(sims, traites, principle=principle, param=param, capital=cap)
+        full = compute_full_stats(_ds(sims), traites, principle=principle, param=param, capital=cap)
     except Exception:
         return empty
 
@@ -908,10 +926,10 @@ def r_render_oep(progs, sims, principle, loading, alpha_std, alpha_var):
         stack = prog.get('stack', [])
         try:
             if stack:
-                full = compute_full_stats(sims, stack, principle=principle, param=param)
+                full = compute_full_stats(_ds(sims), stack, principle=principle, param=param)
                 ch   = full['_D']
             else:
-                ch = compute_charges(sims, stack)
+                ch = compute_charges(_ds(sims), stack)
         except Exception:
             continue
 
@@ -960,9 +978,13 @@ def r_render_oep(progs, sims, principle, loading, alpha_std, alpha_var):
                           annotation_position="top left")
 
     lo = plotly_layout("Courbe OEP — Brut (S) et Net (D = S−R+P_R)", height=480)
-    lo['xaxis'].update(title="Période de retour (années)", type='log',
-                       tickvals=[1,2,5,10,20,50,100,200,500],
-                       ticktext=['1','2','5','10','20','50','100','200','500'], dtick=None)
+    lo['xaxis'].update(
+        title="Période de retour (années)",
+        type='log',
+        autorange=True,
+        tickformat='.0f',
+        dtick=None,
+    )
     lo['yaxis'].update(title="Perte annuelle (€)", tickformat=',.0f', exponentformat='none')
     lo['legend'].update(orientation='v', x=1.01, y=1, xanchor='left')
     lo['margin'].update(r=160)
@@ -1028,7 +1050,7 @@ def r_render_retained_ceded(prog_id, progs, principle, loading, alpha_std, alpha
 
     stack = prog.get('stack', [])
     try:
-        gross_arr, net_no_prem = compute_ceded_charges(sims, stack)
+        gross_arr, net_no_prem = compute_ceded_charges(_ds(sims), stack)
     except Exception:
         return empty_fig, html.Div()
 
@@ -1152,7 +1174,7 @@ def r_render_heatmap(n_clicks, prio_min, prio_max, portee_min, portee_max, steps
     for j, prio in enumerate(prio_list):
         for i, portee in enumerate(portee_list):
             traite = [{'type': 'XS', 'priorite': float(prio), 'portee': float(portee)}]
-            full   = compute_full_stats(sims, traite, principle=principle, param=param)
+            full   = compute_full_stats(_ds(sims), traite, principle=principle, param=param)
             matrix[i, j] = full['net']['mean']
 
     x_labels = [_fmt_eur(v) for v in prio_list]
