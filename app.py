@@ -35,19 +35,21 @@ from config import PALETTE
 
 app.layout = html.Div([
     NAV_TABS,
-    # Stores partagés entre modélisation et réassurance — niveau racine = persistent
-    dcc.Store(id='current-page', data='modelisation'),
-    dcc.Store(id='stored-data'),
-    dcc.Store(id='below-fits'),
-    dcc.Store(id='above-fits'),
-    dcc.Store(id='below-data-store'),
-    dcc.Store(id='above-data-store'),
-    dcc.Store(id='below-freq-store'),
-    dcc.Store(id='above-freq-store'),
+    # Stores partagés entre modélisation et réassurance
+    # storage_type='local'    → persist après fermeture du navigateur
+    # storage_type='session'  → persist sur refresh, effacé à la fermeture de l'onglet
+    dcc.Store(id='current-page',           data='modelisation', storage_type='local'),
+    dcc.Store(id='stored-data',            storage_type='session'),   # données brutes uploadées
+    dcc.Store(id='below-fits',             storage_type='local'),     # résultats modélisation
+    dcc.Store(id='above-fits',             storage_type='local'),
+    dcc.Store(id='below-data-store',       storage_type='session'),   # vecteurs de sinistres
+    dcc.Store(id='above-data-store',       storage_type='session'),
+    dcc.Store(id='below-freq-store',       storage_type='local'),
+    dcc.Store(id='above-freq-store',       storage_type='local'),
     # Stores réassurance
-    dcc.Store(id='r-simulations-store'),
-    dcc.Store(id='r-current-stack-store', data=[]),
-    dcc.Store(id='r-saved-programs-store', data=[]),
+    dcc.Store(id='r-simulations-store',    storage_type='session'),   # simulations (larges)
+    dcc.Store(id='r-current-stack-store',  data=[], storage_type='local'),
+    dcc.Store(id='r-saved-programs-store', data=[], storage_type='local'),
     # Pages rendues une seule fois, visibilité gérée par display
     html.Div(PAGE_MODELISATION, id='page-modelisation', style={'display': 'block'}),
     html.Div(PAGE_REASSURANCE, id='page-reassurance', style={'display': 'none'}),
