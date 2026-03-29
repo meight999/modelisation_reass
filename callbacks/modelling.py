@@ -17,21 +17,23 @@ from views.frequency import view_freq_details, view_freq_cmf, view_freq_ts
 
 @app.callback(
     [Output('stored-data', 'data'), Output('column-name', 'options'),
-     Output('date-column', 'options'), Output('upload-status', 'children')],
+     Output('date-column', 'options'), Output('filter-column', 'options'),
+     Output('upload-status', 'children')],
     Input('upload-data', 'contents'),
     State('upload-data', 'filename')
 )
 def load_data(contents, filename):
-    if contents is None: return None, [], [], ""
+    if contents is None: return None, [], [], [], ""
     try:
         _, content_string = contents.split(',')
         decoded = base64.b64decode(content_string)
         df = pd.read_excel(io.BytesIO(decoded)) if filename.endswith(('.xlsx', '.xls')) else pd.read_csv(io.StringIO(decoded.decode('utf-8')))
-        opts = [{'label': c, 'value': c} for c in df.columns]
+        opts      = [{'label': c, 'value': c} for c in df.columns]
         date_opts = [{'label': '(aucune)', 'value': ''}] + opts
-        return df.to_json(date_format='iso', orient='split'), opts, date_opts, f"✓ {filename} ({len(df):,} lignes)"
+        filt_opts = [{'label': '(aucun)',  'value': ''}] + opts
+        return df.to_json(date_format='iso', orient='split'), opts, date_opts, filt_opts, f"✓ {filename} ({len(df):,} lignes)"
     except Exception as e:
-        return None, [], [], f"Erreur : {str(e)}"
+        return None, [], [], [], f"Erreur : {str(e)}"
 
 
 @app.callback(
@@ -41,15 +43,21 @@ def load_data(contents, filename):
      Output('below-freq-store', 'data'), Output('above-freq-store', 'data')],
     Input('analyze-button', 'n_clicks'),
     [State('stored-data', 'data'), State('column-name', 'value'),
-     State('date-column', 'value'), State('start-date-input', 'value'), State('threshold', 'value')]
+     State('date-column', 'value'), State('start-date-input', 'value'), State('threshold', 'value'),
+     State('filter-column', 'value'), State('filter-value', 'value')]
 )
-def analyze_data(n_clicks, json_data, col, date_col, start_date, threshold):
+def analyze_data(n_clicks, json_data, col, date_col, start_date, threshold, filter_col, filter_val):
     empty = (html.Div(), None, None, None, None, None, None)
     if not n_clicks or not json_data or not col: return empty
     try:
         df = pd.read_json(io.StringIO(json_data), orient='split')
         data = df[col].dropna()
         data = data[data > 0]
+        data = data[np.isfinite(data)]  # exclure les Inf comme R (is.finite)
+        # Filtre LOB / colonne catégorielle (équivalent à lob_clean == "auto" dans R)
+        if filter_col and filter_val and filter_col in df.columns:
+            mask = df.loc[data.index, filter_col].astype(str).str.strip().str.lower() == filter_val.strip().lower()
+            data = data[mask]
         if start_date and date_col and date_col in df.columns:
             ds = pd.to_datetime(df.loc[data.index, date_col], errors='coerce')
             data = data[ds.dt.year >= int(start_date)]

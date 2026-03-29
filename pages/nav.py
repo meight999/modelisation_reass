@@ -8,9 +8,9 @@ NAV_TABS = html.Div([
         html.Div([
             html.Div([
                 html.Span("◈ ", style={'color': PALETTE['accent'], 'fontSize': '18px'}),
-                html.Span("RiskLens", style={
-                    'color': PALETTE['text'], 'fontSize': '17px', 'fontWeight': '700',
-                    'letterSpacing': '1px', 'fontFamily': "'JetBrains Mono', monospace",
+                html.Span("Modélisation Réassurance", style={
+                    'color': PALETTE['text'], 'fontSize': '15px', 'fontWeight': '700',
+                    'letterSpacing': '0.5px', 'fontFamily': "'JetBrains Mono', monospace",
                 }),
             ], style={'display': 'flex', 'alignItems': 'center', 'marginBottom': '2px'}),
             html.Div("Modélisation & Réassurance", style={

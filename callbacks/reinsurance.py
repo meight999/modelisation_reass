@@ -32,7 +32,12 @@ def _best_dist(fits_dict):
 
 
 def _fmt_eur(v):
-    if v is None or (isinstance(v, float) and np.isnan(v)):
+    if v is None:
+        return 'N/A'
+    try:
+        if np.isnan(v):
+            return 'N/A'
+    except (TypeError, ValueError):
         return 'N/A'
     if abs(v) >= 1_000_000:
         return f"{v / 1_000_000:.2f}M €"
@@ -144,13 +149,13 @@ def r_update_banner(below_fits, above_fits, below_freq_store, above_freq_store):
                       style={'color': PALETTE['success'], 'fontSize': '11px', 'fontWeight': '600'}),
         ], style={'marginBottom': '8px'}),
         html.Div("↓ SOUS SEUIL", style={'color': PALETTE['success'], 'fontSize': '10px',
-                                         'fontWeight': '700', 'letterSpacing': '1px',
-                                         'marginBottom': '4px'}),
+                                        'fontWeight': '700', 'letterSpacing': '1px',
+                                        'marginBottom': '4px'}),
         _make_law_row("Sév.", bsd, SEV_DIST_NAMES, PALETTE['success']),
         _make_law_row("Fréq.", bfd, FREQ_DIST_NAMES, PALETTE['below_freq']),
         html.Div("↑ AU-DESSUS", style={'color': PALETTE['danger'], 'fontSize': '10px',
-                                        'fontWeight': '700', 'letterSpacing': '1px',
-                                        'marginBottom': '4px', 'marginTop': '8px'}),
+                                       'fontWeight': '700', 'letterSpacing': '1px',
+                                       'marginBottom': '4px', 'marginTop': '8px'}),
         _make_law_row("Sév.", asd, SEV_DIST_NAMES, PALETTE['danger']),
         _make_law_row("Fréq.", afd, FREQ_DIST_NAMES, PALETTE['above_freq']),
     ], style={
@@ -283,8 +288,12 @@ def r_manage_stack(n_add, n_remove, t, val_qp, val_prio, val_portee, stack):
 
     if trigger == 'r-btn-add-layer':
         if t == 'QP':
+            if val_qp is None:
+                return dash.no_update, dash.no_update
             new_stack.append({'type': 'QP', 'taux_retention': val_qp})
         elif t == 'XS':
+            if val_prio is None or val_portee is None:
+                return dash.no_update, dash.no_update
             new_stack.append({'type': 'XS', 'priorite': val_prio, 'portee': val_portee})
     elif trigger == 'r-btn-remove-layer' and new_stack:
         new_stack.pop()
@@ -335,6 +344,8 @@ def r_manage_stack(n_add, n_remove, t, val_qp, val_prio, val_portee, stack):
 def r_manage_programs(n_save, n_del, n_reset, stack, name, saved, sims, prog_to_del,
                       principle, loading, alpha_std, alpha_var):
     ctx = callback_context
+    if not ctx.triggered:
+        return dash.no_update, dash.no_update, []
     trigger = ctx.triggered[0]['prop_id'].split('.')[0]
     current = (saved or []).copy()
     opts = [{'label': p['name'], 'value': p['id']} for p in current if p['id'] != 'brut']
@@ -915,7 +926,8 @@ def r_render_oep(progs, sims, principle, loading, alpha_std, alpha_var):
 
     principle = principle or 'expected_value'
     param     = _get_premium_param(principle, loading, alpha_std, alpha_var)
-    n_sims    = len(sims)
+    # '_n' holds the actual simulation count in the serialized dict
+    n_sims    = sims.get('_n', 1000) if isinstance(sims, dict) else len(sims)
     fig       = go.Figure()
 
     prog_colors = [PALETTE['danger'], PALETTE['success'], PALETTE['accent2'],
@@ -1170,17 +1182,23 @@ def r_render_heatmap(n_clicks, prio_min, prio_max, portee_min, portee_max, steps
     portee_list = np.linspace(portee_min, portee_max, steps)
 
     # Heatmap sur D = S-R+P_R
-    matrix = np.zeros((len(portee_list), len(prio_list)))
+    matrix = np.full((len(portee_list), len(prio_list)), np.nan)
     for j, prio in enumerate(prio_list):
         for i, portee in enumerate(portee_list):
-            traite = [{'type': 'XS', 'priorite': float(prio), 'portee': float(portee)}]
-            full   = compute_full_stats(_ds(sims), traite, principle=principle, param=param)
-            matrix[i, j] = full['net']['mean']
+            try:
+                traite = [{'type': 'XS', 'priorite': float(prio), 'portee': float(portee)}]
+                full   = compute_full_stats(_ds(sims), traite, principle=principle, param=param)
+                matrix[i, j] = full['net']['mean']
+            except Exception:
+                pass  # cellule laissée à NaN, la heatmap reste partiellement valide
 
     x_labels = [_fmt_eur(v) for v in prio_list]
     y_labels = [_fmt_eur(v) for v in portee_list]
-    min_idx  = np.unravel_index(np.argmin(matrix), matrix.shape)
-    text_mat = [[_fmt_eur(matrix[i, j]) for j in range(len(prio_list))]
+    if np.all(np.isnan(matrix)):
+        return empty_fig, "Erreur : impossible de calculer la heatmap avec ces paramètres."
+    min_idx  = np.unravel_index(np.nanargmin(matrix), matrix.shape)
+    text_mat = [[('' if np.isnan(matrix[i, j]) else _fmt_eur(matrix[i, j]))
+                 for j in range(len(prio_list))]
                 for i in range(len(portee_list))]
 
     fig = go.Figure(go.Heatmap(

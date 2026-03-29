@@ -28,22 +28,22 @@ def fit_pareto(data):
 
 
 def safe_fit_distribution(data, dist_name):
+    # MLE sur TOUTES les données — sous-échantillonner biaise les estimateurs
     try:
-        sample = np.random.choice(data, size=min(5000, len(data)), replace=False) if len(data) > 5000 else data
         if dist_name == 'gamma':
-            shape, loc, scale = stats.gamma.fit(sample, floc=0)
+            shape, loc, scale = stats.gamma.fit(data, floc=0)
             params = {'shape': shape, 'scale': scale}
             loglik = np.sum(stats.gamma.logpdf(data, shape, loc=0, scale=scale))
         elif dist_name == 'lognorm':
-            shape, loc, scale = stats.lognorm.fit(sample, floc=0)
+            shape, loc, scale = stats.lognorm.fit(data, floc=0)
             params = {'shape': shape, 'scale': scale}
             loglik = np.sum(stats.lognorm.logpdf(data, shape, loc=0, scale=scale))
         elif dist_name == 'weibull':
-            shape, loc, scale = stats.weibull_min.fit(sample, floc=0)
+            shape, loc, scale = stats.weibull_min.fit(data, floc=0)
             params = {'shape': shape, 'scale': scale}
             loglik = np.sum(stats.weibull_min.logpdf(data, shape, loc=0, scale=scale))
         elif dist_name == 'pareto':
-            params = fit_pareto(sample)
+            params = fit_pareto(data)
             if params is None:
                 return None
             loglik = np.sum(np.log(pareto_pdf(data, params['shape'], params['scale'])))

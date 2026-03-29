@@ -1,4 +1,4 @@
-print("Démarrage RiskLens...")
+print("Démarrage Modélisation Réassurance...")
 
 from server import app
 from config import GLOBAL_CSS
@@ -7,13 +7,13 @@ from pages.modelling import PAGE_MODELISATION
 from pages.reinsurance import PAGE_REASSURANCE
 from dash import html, dcc
 
-app.title = "RiskLens — Modélisation & Réassurance"
+app.title = "Modélisation Réassurance"
 
 app.index_string = '''<!DOCTYPE html>
 <html>
     <head>
         {%metas%}
-        <title>RiskLens</title>
+        <title>Modélisation Réassurance</title>
         {%favicon%}
         {%css%}
         <style>
@@ -39,11 +39,11 @@ app.layout = html.Div([
     # storage_type='local'    → persist après fermeture du navigateur
     # storage_type='session'  → persist sur refresh, effacé à la fermeture de l'onglet
     dcc.Store(id='current-page',           data='modelisation', storage_type='local'),
-    dcc.Store(id='stored-data',            storage_type='session'),   # données brutes uploadées
+    dcc.Store(id='stored-data',            storage_type='memory'),    # données brutes uploadées (memory = pas de limite de taille)
     dcc.Store(id='below-fits',             storage_type='local'),     # résultats modélisation
     dcc.Store(id='above-fits',             storage_type='local'),
-    dcc.Store(id='below-data-store',       storage_type='session'),   # vecteurs de sinistres
-    dcc.Store(id='above-data-store',       storage_type='session'),
+    dcc.Store(id='below-data-store',       storage_type='memory'),    # vecteurs de sinistres
+    dcc.Store(id='above-data-store',       storage_type='memory'),
     dcc.Store(id='below-freq-store',       storage_type='local'),
     dcc.Store(id='above-freq-store',       storage_type='local'),
     # Stores réassurance
@@ -61,5 +61,5 @@ import callbacks.modelling
 import callbacks.reinsurance
 
 if __name__ == '__main__':
-    print("Lancement sur http://127.0.0.1:8050")
+    print("Lancement sur http://127.0.0.1:8050")  # noqa
     app.run(debug=True, port=8050)
