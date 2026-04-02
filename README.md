@@ -1,1 +1,2 @@
-# reass
+pip install requierments.py
+
